@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ModelDock Studio - Universal Local AI Platform</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="stylesheet" href="/static/css/style.css?v=3.9.0" />
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    // Restore user-customized sidebar width immediately before paint
+    (function() {
+      try {
+        const savedWidth = localStorage.getItem("modeldock_sidebar_width");
+        if (savedWidth) {
+          const w = parseInt(savedWidth, 10);
+          if (w >= 190 && w <= 550) {
+            document.documentElement.style.setProperty("--sidebar-width", `${w}px`);
+          }
+        }
+      } catch(e) {}
+    })();
+
+    // Bulletproof Early-Loaded Sidebar Controller (Immune to cache / network latency)
+    function toggleSidebar(forcedState) {
+      const wrapper = document.getElementById("chat-wrapper");
+      const openBtn = document.getElementById("btn-open-sidebar");
+      if (!wrapper) return;
+
+      const isCollapsed = (typeof forcedState === "boolean")
+        ? forcedState
+        : !wrapper.classList.contains("sidebar-collapsed");
+
+      if (isCollapsed) {
+        wrapper.classList.add("sidebar-collapsed");
+        if (openBtn) {
+          openBtn.classList.remove("hidden");
+          openBtn.style.setProperty("display", "inline-flex", "important");
+        }
+        try { localStorage.setItem("modeldock_sidebar_collapsed", "true"); } catch(e) {}
+      } else {
+        wrapper.classList.remove("sidebar-collapsed");
+        if (openBtn) {
+          openBtn.classList.add("hidden");
+          openBtn.style.setProperty("display", "none", "important");
+        }
+        try { localStorage.setItem("modeldock_sidebar_collapsed", "false"); } catch(e) {}
+      }
+    }
+    window.toggleSidebar = toggleSidebar;
+  </script>
+</head>
+<body class="dark-theme layout-nav-left">
+  <!-- Top Navigation Header -->
+  <header class="navbar">
+    <div class="nav-left">
+      <div class="brand" onclick="switchTab('chat')" title="ModelDock Studio">
+        <div class="brand-icon">
+          <img src="/static/logo.svg" onerror="this.onerror=null; this.src='/static/logo.png';" alt="ModelDock Logo" class="brand-logo-img" />
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">ModelDock</span>
+          <span class="brand-badge">STUDIO</span>
+        </div>
+      </div>
+
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>Chat</span>
+        </button>
+        <button class="nav-tab" data-tab="hf-hub">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+          <span>Explore</span>
+        </button>
+        <button class="nav-tab" data-tab="models">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+          <span>Library</span>
+          <span id="installed-count" class="badge-counter hidden">0</span>
+        </button>
+        <button class="nav-tab" data-tab="downloads">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span>Downloads</span>
+          <span id="active-dl-badge" class="badge-counter hidden">0</span>
+        </button>
+        <button class="nav-tab" data-tab="system">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          <span>Telemetry</span>
+        </button>
+        <button class="nav-tab" data-tab="settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- Navigation Profile & Settings (Left/Right down side, Top/Bottom right side) -->
+    <div class="nav-right nav-profile-section">
+      <div id="navbar-user-profile-btn" class="nav-user-badge" onclick="switchTab('settings'); if(typeof switchSettingsCategory==='function') switchSettingsCategory('profile');" title="User Profile &amp; Settings">
+        <div id="nav-user-avatar" class="nav-user-avatar-circle">U</div>
+        <div class="nav-user-details">
+          <span id="nav-user-fullname" class="nav-user-name">Local AI User</span>
+          <span id="nav-user-tier" class="nav-user-role">Profile &amp; Settings</span>
+        </div>
+      </div>
+
+      <!-- Compatibility placeholders for background telemetry scripts -->
+      <div style="display:none;" aria-hidden="true">
+        <span id="pill-app-ram"></span>
+        <span id="pill-gpu-vram"></span>
+        <span id="engine-status-pill"><span id="engine-pill-text"></span></span>
+        <span id="hf-auth-pill"><span id="hf-pill-text"></span></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main View Area -->
+  <main class="main-container">
+    <!-- TAB 1: Chat & Playground (ChatGPT-Style Layout) -->
+    <section id="tab-chat" class="tab-content active">
+      <div class="chat-wrapper" id="chat-wrapper">
+        <!-- Left ChatGPT-Style Sidebar -->
+        <aside id="chat-sidebar" class="chat-sidebar">
+          <!-- Top Header: Brand, Search, Toggle Collapse -->
+          <div class="sidebar-header">
+            <div class="sidebar-brand" onclick="switchTab('chat')" title="ModelDock Studio">
+              <div class="sidebar-logo-box">
+                <img src="/static/logo.svg" onerror="this.onerror=null; this.src='/static/logo.png';" alt="ModelDock Logo" class="sidebar-logo-img" />
+              </div>
+              <span class="sidebar-brand-name">ModelDock</span>
+            </div>
+            <div class="sidebar-header-actions">
+              <button id="btn-search-chats" class="sidebar-icon-btn" title="Search chats or projects (Ctrl+K)" type="button">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </button>
+              <button id="btn-toggle-sidebar" class="sidebar-icon-btn" title="Close sidebar (Ctrl+B)" type="button" onclick="toggleSidebar(true)">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- New Chat Button -->
+          <div class="sidebar-new-chat-wrap">
+            <button id="btn-new-chat" class="new-chat-btn" title="Start new conversation (Ctrl+N)" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+              <span>New chat</span>
+            </button>
+          </div>
+
+          <!-- Search Bar for Chats / Projects (Opens via search icon or hotkey) -->
+          <div id="sidebar-search-box" class="sidebar-search-box hidden">
+            <div class="search-input-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" id="chat-search-input" placeholder="Search chats or projects..." />
+              <button id="btn-clear-search" class="search-clear-btn" title="Clear search" type="button">&times;</button>
+            </div>
+          </div>
+
+          <!-- Quick Navigation Links (Scheduled, Library, Explore) -->
+          <div class="sidebar-nav-list">
+            <div class="sidebar-nav-item" onclick="switchTab('models')" title="My local model library">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+              <span>Library</span>
+            </div>
+            <div class="sidebar-nav-item" onclick="switchTab('hf-hub')" title="Explore thousands of open models">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+              <span>Explore</span>
+            </div>
+          </div>
+
+          <!-- Scrollable Chat History Sessions -->
+          <div class="sidebar-scroll-area">
+            <!-- Pinned Accordion -->
+            <div class="sidebar-group-header" onclick="toggleSidebarGroup('pinned')">
+              <span>Pinned</span>
+              <span id="pinned-arrow" class="group-arrow">›</span>
+            </div>
+            <div id="pinned-chats-list" class="sidebar-session-list"></div>
+
+            <!-- Projects Accordion -->
+            <div class="sidebar-group-header projects-group-header">
+              <div class="group-header-clickable" onclick="toggleSidebarGroup('projects')">
+                <span>Projects</span>
+                <span id="projects-arrow" class="group-arrow">›</span>
+              </div>
+              <button id="btn-create-project-sidebar" class="sidebar-group-action-btn" title="Create New Project" type="button" onclick="event.stopPropagation(); openNewProjectModal();">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+            </div>
+            <div id="projects-chats-list" class="sidebar-session-list projects-session-container"></div>
+
+            <!-- Recents Title & List -->
+            <div class="sidebar-group-header recents-header">
+              <span>Recents</span>
+            </div>
+            <div id="recent-chats-list" class="sidebar-session-list">
+              <!-- Dynamically populated from saved sessions -->
+            </div>
+          </div>
+
+          <!-- Bottom Profile & Settings Bar Section -->
+          <div class="sidebar-profile-footer">
+            <div class="sidebar-profile-card" onclick="switchTab('settings'); if(typeof switchSettingsCategory==='function') switchSettingsCategory('profile');" title="Customize Profile & Identity">
+              <div id="sidebar-user-avatar" class="sidebar-avatar-circle">U</div>
+              <div class="sidebar-user-details">
+                <span id="sidebar-user-name" class="sidebar-user-fullname">Local AI User</span>
+                <span id="sidebar-user-plan" class="sidebar-user-tier">Local AI • Pro</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Draggable Resizer Handle for Sidebar -->
+        <div id="sidebar-resizer" class="sidebar-resizer" title="Drag to resize sidebar width (Double-click to reset)"></div>
+
+        <!-- Right Main Chat Canvas -->
+        <div class="chat-main">
+          <!-- Chat Topbar with Toggle Sidebar Button, Model Select, Parameters -->
+          <div class="chat-topbar">
+            <div class="chat-topbar-left">
+              <button id="btn-open-sidebar" class="sidebar-open-btn hidden" title="Open sidebar (Ctrl+B)" type="button" onclick="toggleSidebar(false)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+                <span>Sidebar</span>
+              </button>
+              <div class="model-select-wrap">
+                <label for="chat-model-select">Running Model:</label>
+                <select id="chat-model-select" class="select-dropdown">
+                  <option value="" disabled selected>Loading installed models...</option>
+                </select>
+                <button class="btn-icon" id="btn-refresh-models" title="Refresh local models" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                </button>
+                <button class="btn-icon" id="btn-chat-model-info" title="Inspect Model Architecture & Hardware Specs" onclick="openActiveModelDetails()" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="chat-actions">
+              <button class="btn-secondary btn-sm" id="btn-toggle-params" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                Parameters
+              </button>
+              <button class="btn-secondary btn-sm" id="btn-clear-chat" title="Clear current messages" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Collapsible Parameters Panel -->
+          <div id="chat-params-panel" class="params-drawer hidden">
+            <div class="params-grid">
+              <div class="param-item">
+                <div class="param-header">
+                  <label for="param-temp">Temperature: <span id="temp-val">0.7</span></label>
+                </div>
+                <input type="range" id="param-temp" min="0.0" max="1.5" step="0.05" value="0.7" />
+                <div class="param-hint">Lower = deterministic & precise; Higher = creative & diverse.</div>
+              </div>
+
+              <div class="param-item">
+                <div class="param-header">
+                  <label for="param-ctx">Context Window: <span id="ctx-val">4096</span> tokens</label>
+                </div>
+                <select id="param-ctx" class="select-dropdown-sm">
+                  <option value="2048">2,048 tokens</option>
+                  <option value="4096" selected>4,096 tokens</option>
+                  <option value="8192">8,192 tokens</option>
+                  <option value="16384">16,384 tokens</option>
+                  <option value="32768">32,768 tokens (High VRAM)</option>
+                </select>
+                <div class="param-hint">Token capacity for history and prompt.</div>
+              </div>
+
+              <div class="param-item param-full">
+                <label for="param-system-prompt">System Prompt:</label>
+                <textarea id="param-system-prompt" rows="2" placeholder="You are ModelDock, an intelligent, helpful, and concise local AI assistant."></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Project Context Banner (Visible when chatting inside a Project) -->
+          <div id="project-context-banner" class="project-context-banner hidden">
+            <div class="project-banner-info">
+              <span class="project-banner-badge">
+                <span class="project-banner-icon">📁</span>
+                <span id="project-banner-name">Project Name</span>
+              </span>
+              <span id="project-banner-model" class="project-banner-pill" title="Assigned model for this project">🤖 Model</span>
+              <span id="project-banner-prompt-tag" class="project-banner-pill project-pill-accent hidden" title="Custom system instructions active">💡 Custom Instructions</span>
+            </div>
+            <div class="project-banner-actions">
+              <button id="btn-project-new-chat" class="btn-project-pill" title="Start another chat inside this project" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>New Chat in Project</span>
+              </button>
+              <button id="btn-project-settings" class="btn-project-pill-ghost" title="Edit project instructions and model" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Project Settings</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chat Messages Scroll Container -->
+          <div id="chat-messages" class="chat-messages-container">
+            <div class="chat-welcome">
+              <div class="welcome-center-brand">
+                <div class="welcome-logo-wrap">
+                  <img src="/static/logo.svg" onerror="this.onerror=null; this.src='/static/logo.png';" alt="ModelDock Logo" class="welcome-logo-img" />
+                </div>
+                <h1 class="welcome-heading">Ready when you are.</h1>
+                <p class="welcome-subheading">Ask ModelDock anything, analyze documents, images, code, or local workflows.</p>
+              </div>
+              <div class="quick-prompts-chatgpt">
+                <button class="quick-prompt-card" onclick="sendQuickPrompt('Inspect this screenshot/image and explain its layout, components, and implementation.')" type="button">
+                  <div class="prompt-card-icon">🖼️</div>
+                  <div class="prompt-card-text">
+                    <strong>Create an image or vision query</strong>
+                    <span>Analyze screenshot, UI, or vision queries</span>
+                  </div>
+                </button>
+                <button class="quick-prompt-card" onclick="sendQuickPrompt('Write and edit a clean async Python service with type annotations, docstrings, and tests.')" type="button">
+                  <div class="prompt-card-icon">✏️</div>
+                  <div class="prompt-card-text">
+                    <strong>Write or edit</strong>
+                    <span>Draft code, essays, resumes, or letters</span>
+                  </div>
+                </button>
+                <button class="quick-prompt-card" onclick="sendQuickPrompt('Analyze the structure, key metrics, summary, and data insights from this document.')" type="button">
+                  <div class="prompt-card-icon">📄</div>
+                  <div class="prompt-card-text">
+                    <strong>Analyze documentation</strong>
+                    <span>Process PDF, Excel, CSV, DOCX files</span>
+                  </div>
+                </button>
+                <button class="quick-prompt-card" onclick="sendQuickPrompt('Explain how quantization (Q4_K_M vs FP16) works in GGUF models simply.')" type="button">
+                  <div class="prompt-card-icon">✨</div>
+                  <div class="prompt-card-text">
+                    <strong>Deep reasoning</strong>
+                    <span>Explain complex concepts and models</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat Input Bar (ChatGPT Styled Floating Capsule) -->
+          <div class="chat-input-area">
+            <div id="chat-drop-container" class="input-container chatgpt-input-capsule">
+              <!-- Hidden file input for documents, images, screenshots, videos -->
+              <input type="file" id="chat-file-input" class="hidden" multiple accept="image/*,video/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.sql" />
+
+              <!-- Plus Upload Button -->
+              <button id="btn-attach" class="btn-icon btn-attach-plus" title="Attach Document (PDF, Excel, CSV), Screenshot, Image, or Video" type="button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+
+              <div class="input-container-inner">
+                <!-- Attachment Previews Tray -->
+                <div id="chat-attachment-tray" class="attachment-tray hidden"></div>
+                <textarea id="user-input" placeholder="Ask ModelDock..." rows="1"></textarea>
+              </div>
+
+              <div class="input-controls">
+                <!-- Think Mode Pill -->
+                <button id="btn-chat-think" class="btn-think-pill" type="button" title="Toggle parameters / reasoning controls">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M9 12a3 3 0 0 0 6 0"></path><path d="M12 3v3"></path></svg>
+                  <span>Think</span>
+                </button>
+
+                <span id="chat-stream-stats" class="stream-stats"></span>
+
+                <button id="btn-send" class="btn-send-round" title="Send prompt" type="button">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                </button>
+                <button id="btn-stop" class="btn-stop-round hidden" title="Stop generating" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: Hugging Face Hub -->
+    <section id="tab-hf-hub" class="tab-content">
+      <div class="hf-hub-container">
+        <!-- Hub Search Header -->
+        <div class="hub-header">
+          <div>
+            <h2>🌐 Explore Open-Source Models</h2>
+            <p class="section-desc">Search, explore, and 1-click download thousands of open-source models directly into your local library.</p>
+          </div>
+          <div class="hub-search-bar">
+            <div class="search-input-wrap">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" id="hf-search-query" placeholder="Type to search any open-source model (DeepSeek, Llama, Qwen, Mistral)..." autocomplete="off" />
+              <!-- Instant Type-Ahead Dropdown Menu (Hugging Face, Ollama, Local) -->
+              <div id="omni-search-dropdown" class="omni-search-dropdown hidden"></div>
+            </div>
+            <div class="select-wrapper-sm">
+              <select id="hf-sort-select" class="select-dropdown-sm">
+                <option value="downloads">Most Downloaded</option>
+                <option value="likes">Most Liked</option>
+                <option value="trendingScore">Trending</option>
+                <option value="lastModified">Recently Updated</option>
+              </select>
+            </div>
+            <button id="btn-hf-search" class="btn-primary hub-search-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <span>Search Models</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Featured / Trending Grid Header -->
+        <div class="hub-section-title">
+          <div class="hub-section-heading">
+            <span class="hub-section-icon">⭐</span>
+            <span id="hub-grid-title">Featured & Popular Open-Source Models</span>
+          </div>
+          <button id="btn-show-featured" class="btn-reset-featured" title="Reset filter to featured models">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+            </svg>
+            <span>Reset to Featured</span>
+          </button>
+        </div>
+
+        <div id="hf-models-grid" class="models-grid">
+          <div class="loading-spinner">Loading Hugging Face catalog...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: Model Library -->
+    <section id="tab-models" class="tab-content">
+      <div class="library-container">
+        <div class="lib-header">
+          <div>
+            <h2>💾 My Model Library</h2>
+            <p class="section-desc">All models currently installed and ready for immediate, offline local execution.</p>
+          </div>
+          <div class="lib-header-actions">
+            <button id="btn-import-gguf-modal" class="btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              Import Local .GGUF File
+            </button>
+            <button id="btn-refresh-lib" class="btn-secondary" onclick="refreshLocalModels(this)" title="Rescan local models directory and refresh library">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- Local Models Grid -->
+        <div id="local-models-grid" class="models-grid">
+          <div class="loading-spinner">Discovering local models...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: Active Downloads -->
+    <section id="tab-downloads" class="tab-content">
+      <div class="downloads-container">
+        <div class="lib-header">
+          <div>
+            <h2>⬇️ Universal Model Download Center</h2>
+            <p class="section-desc">Manage, pause, and resume downloads from both <strong>Hugging Face Hub</strong> (HTTP Range chunked resume) and <strong>Ollama Library</strong> (Layer-blob resume).</p>
+          </div>
+        </div>
+
+        <!-- Ollama Pull Quick Card -->
+        <div class="download-source-card">
+          <div class="dl-source-header">
+            <div class="dl-source-icon">🦙</div>
+            <div>
+              <h3>Pull from Ollama Library</h3>
+              <p class="param-hint">Download any open-source model directly by name with automatic layer caching and pause/resume capability.</p>
+            </div>
+          </div>
+          <div class="ollama-pull-input-row">
+            <input type="text" id="ollama-pull-input" placeholder="e.g. llama3.2:1b, deepseek-r1:1.5b, qwen2.5-coder:7b, mistral, phi4" />
+            <button id="btn-ollama-pull" class="btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Pull Model
+            </button>
+          </div>
+          <div class="quick-pull-chips">
+            <span class="chip-label">Quick picks:</span>
+            <button class="pull-chip" onclick="setOllamaPullModel('llama3.2:1b')">llama3.2:1b (1.3 GB)</button>
+            <button class="pull-chip" onclick="setOllamaPullModel('llama3.2:3b')">llama3.2:3b (2.0 GB)</button>
+            <button class="pull-chip" onclick="setOllamaPullModel('deepseek-r1:1.5b')">deepseek-r1:1.5b (1.1 GB)</button>
+            <button class="pull-chip" onclick="setOllamaPullModel('qwen2.5-coder:7b')">qwen2.5-coder:7b (4.7 GB)</button>
+            <button class="pull-chip" onclick="setOllamaPullModel('mistral:7b')">mistral:7b (4.1 GB)</button>
+          </div>
+        </div>
+
+        <!-- Downloads List with Pause / Resume / Cancel -->
+        <div class="hub-section-title downloads-section-title" style="margin-top: 1.85rem;">
+          <div class="hub-section-heading">
+            <span class="hub-section-icon">📥</span>
+            <span>Active &amp; Recent Model Downloads</span>
+            <span id="dl-header-count" class="badge-counter">0</span>
+          </div>
+          <button id="btn-clear-completed-dl" class="btn-clear-downloads" title="Clear finished, cancelled, or failed downloads">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            <span>Clear Completed</span>
+          </button>
+        </div>
+
+        <div id="downloads-list" class="downloads-list">
+          <div class="empty-state">
+            <p>No active downloads. Pull an Ollama model above or search Hugging Face Hub.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: Telemetry & Zero Bloat -->
+    <section id="tab-system" class="tab-content">
+      <div class="telemetry-container">
+        <div class="lib-header">
+          <div>
+            <h2>📊 System Resources & Software Telemetry</h2>
+            <p class="section-desc">Proof of ultra-low software footprint: ModelDock Studio runs on less than 30MB RAM so your CPU & GPU are completely dedicated to running models.</p>
+          </div>
+          <button id="btn-refresh-telemetry" class="btn-secondary">Refresh Now</button>
+        </div>
+
+        <div class="telemetry-grid">
+          <!-- Software Footprint Card -->
+          <div class="stat-card highlight-card">
+            <div class="stat-header">
+              <span class="stat-title">ModelDock Studio Footprint</span>
+              <span class="badge-success">Ultra-Lean</span>
+            </div>
+            <div class="stat-number" id="stat-proc-ram">-- MB</div>
+            <div class="stat-sub">Software RAM usage (RSS)</div>
+            <div class="stat-row">
+              <span>Software CPU Load:</span>
+              <strong id="stat-proc-cpu">0.0%</strong>
+            </div>
+            <div class="stat-row">
+              <span>Software Architecture:</span>
+              <strong>Async Python & Native Web</strong>
+            </div>
+          </div>
+
+          <!-- GPU Card -->
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-title">GPU VRAM Acceleration</span>
+              <span id="stat-gpu-badge" class="badge">NVIDIA</span>
+            </div>
+            <div class="stat-number" id="stat-gpu-vram">-- / -- MB</div>
+            <div class="stat-sub" id="stat-gpu-name">Checking GPU...</div>
+            <div class="progress-bar-wrap">
+              <div id="stat-gpu-bar" class="progress-bar" style="width: 0%"></div>
+            </div>
+            <div class="stat-row">
+              <span>GPU Utilization:</span>
+              <strong id="stat-gpu-util">-- %</strong>
+            </div>
+            <div class="stat-row">
+              <span>Temperature:</span>
+              <strong id="stat-gpu-temp">-- °C</strong>
+            </div>
+          </div>
+
+          <!-- Host RAM Card -->
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-title">System Host RAM</span>
+              <span class="badge">16 GB Total</span>
+            </div>
+            <div class="stat-number" id="stat-host-ram">-- / -- GB</div>
+            <div class="stat-sub">Host memory allocation</div>
+            <div class="progress-bar-wrap">
+              <div id="stat-host-bar" class="progress-bar" style="width: 0%"></div>
+            </div>
+            <div class="stat-row">
+              <span>Available RAM:</span>
+              <strong id="stat-host-avail">-- GB</strong>
+            </div>
+            <div class="stat-row">
+              <span>CPU Cores:</span>
+              <strong id="stat-host-cores">--</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Architecture Breakdown -->
+        <div class="arch-card">
+          <h3>Why ModelDock Studio uses 95% less RAM than typical AI apps</h3>
+          <div class="arch-points">
+            <div class="arch-item">
+              <div class="arch-icon">🚀</div>
+              <div>
+                <strong>Zero Electron Bloat</strong>
+                <p>Standard AI wrappers bundle Chromium and Node.js consuming 600MB–1.2GB RAM before you even load a model. ModelDock runs a native lightweight async server consuming only ~28MB.</p>
+              </div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-icon">⚡</div>
+              <div>
+                <strong>Direct GPU Acceleration</strong>
+                <p>Models are executed directly via CUDA/Vulkan kernels in the native standalone engine with zero intermediate memory copies.</p>
+              </div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-icon">🌐</div>
+              <div>
+                <strong>OpenAI-Compatible Drop-In API</strong>
+                <p>You can connect any tool (VS Code Continue, Cursor, LangChain) directly to <code>http://localhost:7860/v1</code> without running separate backend servers.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: Podman-Style Settings & Resource Preferences -->
+    <section id="tab-settings" class="tab-content">
+      <div class="settings-container">
+        <div class="settings-header">
+          <h2>Preferences & Engine Settings</h2>
+          <p class="section-desc">Configure compute resources, model storage directories, hardware acceleration, and remote registries—modeled after Podman Desktop.</p>
+        </div>
+
+        <div class="settings-layout">
+          <!-- Left Sidebar Menu -->
+          <aside class="settings-sidebar">
+            <button class="settings-nav-btn active" data-category="profile">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              Profile & Identity
+            </button>
+            <button class="settings-nav-btn" data-category="engine">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
+              Resources & Engine
+            </button>
+            <button class="settings-nav-btn" data-category="auth">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              Authentication & Keys
+            </button>
+            <button class="settings-nav-btn" data-category="storage">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              Storage & Folders
+            </button>
+            <button class="settings-nav-btn" data-category="network">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              Network & API Server
+            </button>
+            <button class="settings-nav-btn" data-category="about">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              About & Engine
+            </button>
+          </aside>
+
+          <!-- Right Content Area -->
+          <div class="settings-content">
+            <!-- PANE 0: User Profile & Identity -->
+            <div id="settings-pane-profile" class="settings-pane active">
+              <div class="settings-pane-header">
+                <h3>User Profile & Identity</h3>
+                <p>Customize your personal display name, role or title, and avatar appearance across ModelDock Studio.</p>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="profile-preview-card" style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); margin-bottom: 1.25rem;">
+                  <div id="settings-avatar-preview" class="sidebar-avatar-circle" style="width: 52px; height: 52px; font-size: 1.25rem; font-weight: 700;">U</div>
+                  <div>
+                    <h4 id="settings-name-preview" style="margin: 0; font-size: 1.1rem; color: #fff;">Local AI User</h4>
+                    <span id="settings-title-preview" style="font-size: 0.82rem; color: var(--accent-cyan);">Local AI • Pro</span>
+                  </div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-user-name">Your Display Name:</label>
+                  </div>
+                  <input type="text" id="setting-user-name" class="form-input" placeholder="e.g. Sanjay Sheel or Alex" value="Local AI User" />
+                  <div class="param-hint">This name is displayed in the bottom-left profile card and in your chat conversation bubbles.</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-user-title">Your Role / Title / Plan:</label>
+                  </div>
+                  <input type="text" id="setting-user-title" class="form-input" placeholder="e.g. Local AI • Pro or ML Researcher" value="Local AI • Pro" />
+                  <div class="param-hint">Custom title displayed below your name in the workspace sidebar.</div>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1.25rem;">
+                  <button id="btn-save-profile" class="btn-primary" type="button">Save Profile</button>
+                  <span id="profile-save-status" class="hidden" style="color: var(--accent-emerald); font-size: 0.88rem; font-weight: 500;">✓ Profile saved successfully!</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE 1: Engine & Resources -->
+            <div id="settings-pane-engine" class="settings-pane">
+              <div class="settings-pane-header">
+                <h3>Hardware & Compute Allocation</h3>
+                <p>Configure CPU threads, GPU acceleration offloading, and default model context boundaries.</p>
+              </div>
+
+              <!-- UI Layout & Navigation Bar Preferences -->
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-nav-position">Primary Navigation Bar Position:</label>
+                    <span id="nav-pos-badge" class="badge badge-cyan">Active: Left Sidebar</span>
+                  </div>
+                  <select id="setting-nav-position" class="select-dropdown">
+                    <option value="left" selected>Left Sidebar (Vertical Dock on Left)</option>
+                    <option value="top">Top Header (Classic Bar at Top)</option>
+                    <option value="right">Right Sidebar (Vertical Dock on Right)</option>
+                    <option value="bottom">Bottom Dock (Horizontal Bar at Down/Bottom Side)</option>
+                  </select>
+                  <div class="param-hint">Choose where the primary navigation bar appears. Switches instantly without reloading.</div>
+                </div>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-cpu-threads">CPU Threads: <span id="setting-cpu-val" class="metric-highlight">4</span></label>
+                    <span id="setting-cpu-max" class="badge">Detecting cores...</span>
+                  </div>
+                  <input type="range" id="setting-cpu-threads" min="1" max="16" step="1" value="4" />
+                  <div class="param-hint">Number of dedicated CPU execution threads passed to the native llama.cpp engine (<code>-t</code>).</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-gpu-mode">Hardware Acceleration Mode:</label>
+                  </div>
+                  <select id="setting-gpu-mode" class="select-dropdown">
+                    <option value="auto" selected>Auto (NVIDIA CUDA / Vulkan GPU Offload)</option>
+                    <option value="cpu">CPU Only (No GPU VRAM offload)</option>
+                    <option value="custom">Custom GPU Layer Offload (Manual)</option>
+                  </select>
+                  <div class="param-hint">ModelDock auto-detects your NVIDIA RTX GPU and offloads transformer matrix layers.</div>
+                </div>
+
+                <div id="setting-gpu-layers-wrap" class="settings-row" style="display: none;">
+                  <div class="settings-label-wrap">
+                    <label for="setting-gpu-layers">GPU Layers to Offload (<code>-ngl</code>):</label>
+                  </div>
+                  <input type="number" id="setting-gpu-layers" class="select-dropdown" min="1" max="120" value="99" />
+                  <div class="param-hint">Number of neural network layers offloaded into GPU VRAM (99 = entire model).</div>
+                </div>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-default-ctx">Default Context Window:</label>
+                  </div>
+                  <select id="setting-default-ctx" class="select-dropdown">
+                    <option value="2048">2,048 tokens (Low RAM/VRAM)</option>
+                    <option value="4096" selected>4,096 tokens (Balanced Standard)</option>
+                    <option value="8192">8,192 tokens (Large Document)</option>
+                    <option value="16384">16,384 tokens (Deep Reasoning)</option>
+                    <option value="32768">32,768 tokens (High VRAM)</option>
+                  </select>
+                  <div class="param-hint">Maximum token capacity for prompt input and chat history.</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-default-temp">Default Temperature: <span id="setting-temp-val" class="metric-highlight">0.7</span></label>
+                  </div>
+                  <input type="range" id="setting-default-temp" min="0.0" max="1.5" step="0.05" value="0.7" />
+                  <div class="param-hint">Sampling randomness. Lower is more factual; higher is more creative.</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-system-prompt">Global Default System Prompt:</label>
+                  </div>
+                  <textarea id="setting-system-prompt" rows="2" class="form-input" placeholder="You are ModelDock, an intelligent, helpful, and concise local AI assistant."></textarea>
+                </div>
+              </div>
+            </div>
+            <!-- PANE 2: Authentication & Access Keys -->
+            <div id="settings-pane-auth" class="settings-pane">
+              <div class="settings-pane-header">
+                <h3>Authentication & Model Access Keys</h3>
+                <p>Manage model registry credentials and tokens for gated open-source models (Meta Llama 3, Mistral, Google Gemma 2).</p>
+              </div>
+
+              <!-- HF Auth Card -->
+              <div class="settings-section-card">
+                <div class="auth-card-header" style="margin-bottom: 1rem;">
+                  <div class="auth-icon-lg">🤗</div>
+                  <div>
+                    <h4 style="color: #fff; margin: 0 0 0.25rem 0; font-size: 1.05rem;">Hugging Face Hub Authentication</h4>
+                    <p style="margin: 0; color: var(--text-muted); font-size: 0.83rem;">Connect your Hugging Face Access Token to download gated and private repository models directly into your local library.</p>
+                  </div>
+                </div>
+
+                <!-- Current Auth Status Banner -->
+                <div id="auth-status-banner" class="status-banner banner-neutral">
+                  <span class="status-icon">ℹ️</span>
+                  <div class="status-text">
+                    <strong id="auth-status-title">Checking authentication status...</strong>
+                    <div id="auth-status-desc">Loading stored credentials...</div>
+                  </div>
+                </div>
+
+                <!-- User Profile Details (If Authenticated) -->
+                <div id="auth-profile-box" class="profile-box hidden">
+                  <img id="auth-user-avatar" class="user-avatar" src="" alt="Avatar" />
+                  <div class="profile-info">
+                    <h3 id="auth-user-name">Username</h3>
+                    <p id="auth-user-fullname">Full Name</p>
+                    <div class="profile-badges">
+                      <span id="auth-token-role" class="badge">Role: Read</span>
+                      <span id="auth-user-orgs" class="badge">Orgs: 0</span>
+                    </div>
+                  </div>
+                  <button id="btn-hf-logout" class="btn-danger btn-sm" type="button">Disconnect Token</button>
+                </div>
+
+                <!-- Token Input Form -->
+                <div id="auth-input-form" class="auth-form" style="margin-top: 1rem;">
+                  <div class="settings-label-wrap">
+                    <label for="hf-token-input" style="font-weight: 500; font-size: 0.88rem; color: var(--text-secondary);">Hugging Face User Access Token:</label>
+                    <div id="setting-hf-preview"><span class="badge">Checking...</span></div>
+                  </div>
+                  <div class="token-input-row">
+                    <input type="password" id="hf-token-input" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+                    <button id="btn-toggle-token-vis" class="btn-icon" title="Toggle visibility" type="button">👁️</button>
+                    <button id="btn-save-hf-token" class="btn-primary" type="button">Verify & Save</button>
+                  </div>
+                  <div class="param-hint" style="margin-top: 0.5rem;">
+                    💡 Don't have a token? Get your free User Access Token from:
+                    <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style="color: var(--accent-cyan); text-decoration: underline;">huggingface.co/settings/tokens</a>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Standalone Native Engine Details -->
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>⚡ Standalone Native Inference Engine:</label>
+                    <span class="badge badge-cyan">Zero Ollama Required</span>
+                  </div>
+                  <p class="param-hint">ModelDock Studio executes open-source models natively using bundled <code>llama.cpp</code> with hardware acceleration.</p>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>Native Engine Binary:</label>
+                  </div>
+                  <code id="setting-binary-path" class="code-preview" style="display: block; padding: 0.55rem; background: var(--bg-primary); border-radius: 6px; font-size: 0.8rem; overflow-x: auto;">Detecting bundled engine...</code>
+                </div>
+                <div class="settings-row" style="margin-bottom: 0;">
+                  <div class="settings-label-wrap">
+                    <label>Engine Port & Host:</label>
+                  </div>
+                  <input type="text" id="setting-ollama-host" value="http://127.0.0.1:8089" readonly class="form-input" style="max-width: 280px;" />
+                </div>
+              </div>
+            </div>
+<!-- PANE 3: Storage & Folders -->
+            <div id="settings-pane-storage" class="settings-pane">
+              <div class="settings-pane-header">
+                <h3>Storage & Directory Management</h3>
+                <p>Configure local file paths for models and downloads, or clean temporary download fragments.</p>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-models-dir">Installed Models Directory:</label>
+                  </div>
+                  <div class="settings-inline-btn">
+                    <input type="text" id="setting-models-dir" class="form-input" style="flex: 1;" readonly />
+                    <button id="btn-open-models-dir" class="btn-secondary btn-sm">
+                      📁 Open in Explorer
+                    </button>
+                  </div>
+                  <div class="param-hint">All GGUF models stored in this directory appear automatically in your Model Library.</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-downloads-dir">Downloads Cache Directory:</label>
+                  </div>
+                  <div class="settings-inline-btn">
+                    <input type="text" id="setting-downloads-dir" class="form-input" style="flex: 1;" readonly />
+                    <button id="btn-open-downloads-dir" class="btn-secondary btn-sm">
+                      📁 Open in Explorer
+                    </button>
+                  </div>
+                  <div class="param-hint">Active and resumable download chunks are streamed into this folder.</div>
+                </div>
+
+                <div class="settings-row" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);">
+                  <div class="settings-label-wrap">
+                    <label>Reclaim Disk Space:</label>
+                  </div>
+                  <button id="btn-prune-cache" class="btn-secondary btn-sm" style="color: var(--accent-amber);">
+                    🧹 Prune Temporary Download Fragments (.tmp / .part)
+                  </button>
+                  <div class="param-hint">Safely deletes interrupted or orphaned download fragments without touching completed models.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE 4: Network & API Server -->
+            <div id="settings-pane-network" class="settings-pane">
+              <div class="settings-pane-header">
+                <h3>Network & Local Server Binding</h3>
+                <p>Configure HTTP host binding, service ports, and third-party API integration endpoints.</p>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-server-host">Server Host:</label>
+                  </div>
+                  <input type="text" id="setting-server-host" class="form-input" value="127.0.0.1" />
+                  <div class="param-hint">Use <code>127.0.0.1</code> for secure local machine access, or <code>0.0.0.0</code> to share across your local LAN.</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label for="setting-server-port">Server Port:</label>
+                  </div>
+                  <input type="number" id="setting-server-port" class="form-input" value="7860" />
+                  <div class="param-hint">Web application port (includes automatic conflict fallback if busy).</div>
+                </div>
+
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>OpenAI-Compatible Local Endpoint:</label>
+                    <span class="badge badge-cyan">Active</span>
+                  </div>
+                  <code style="display: block; padding: 0.6rem; background: var(--bg-primary); border-radius: 6px; font-size: 0.82rem; margin-top: 0.4rem;">
+                    POST http://127.0.0.1:7860/v1/chat/completions
+                  </code>
+                  <div class="param-hint">Use this URL directly in Cursor, VS Code Continue, OpenWebUI, or LangChain.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE 5: About & Architecture -->
+            <div id="settings-pane-about" class="settings-pane">
+              <div class="settings-pane-header">
+                <h3>About ModelDock Studio</h3>
+                <p>Lightweight, daemon-free native local AI software for Windows.</p>
+              </div>
+
+              <div class="settings-section-card">
+                <div class="about-brand-card">
+                  <div class="about-logo-box">
+                    <img src="/static/logo.svg" onerror="this.onerror=null; this.src='/static/logo.png';" alt="ModelDock Logo" class="about-logo-img" />
+                  </div>
+                  <div>
+                    <h4 style="font-size: 1rem; color: #fff; margin-bottom: 0.15rem;">ModelDock Studio</h4>
+                    <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Universal Local AI Desktop Platform for Windows</p>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>Software Version:</label>
+                    <span class="badge badge-success">v1.0.0 (Windows Native)</span>
+                  </div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>Execution Engine:</label>
+                    <span class="badge badge-cyan">Standalone llama.cpp (Zero Ollama Daemon)</span>
+                  </div>
+                  <div class="param-hint">Independent native runtime without external background services.</div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label-wrap">
+                    <label>Desktop Shell:</label>
+                    <span class="badge">Microsoft Edge WebView2 (~35 MB RAM)</span>
+                  </div>
+                  <div class="param-hint">Zero Electron overhead. 99% of system memory stays dedicated to your models.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Save Bar -->
+            <div class="settings-footer">
+              <div id="settings-status-msg"></div>
+              <button id="btn-save-settings" class="btn-primary">
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Repo Inspector Modal (Comprehensive Model Information & GGUF Quantizations) -->
+  <div id="modal-repo-inspect" class="modal-backdrop hidden" onclick="if(event.target === this) closeInspectModal()">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <div class="modal-header-main">
+          <div class="modal-title-row">
+            <h3 id="inspect-modal-title">Model Specifications</h3>
+            <span id="inspect-modal-source" class="badge badge-cyan">🤗 Hugging Face</span>
+            <span id="inspect-modal-access" class="badge badge-success">Open Access</span>
+          </div>
+          <div class="modal-subtitle-row">
+            <span id="inspect-modal-repo-id" class="code-badge">author/repo</span>
+            <a id="inspect-modal-source-link" href="#" target="_blank" rel="noopener noreferrer" class="link-external" title="Open Repository on Hugging Face">
+              <span>View on Hugging Face</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
+          </div>
+        </div>
+        <button class="btn-close" onclick="closeInspectModal()" title="Close Inspector">✕</button>
+      </div>
+
+      <div class="modal-body modal-body-scrollable">
+        <!-- Quick Specs Key-Value Grid -->
+        <div class="model-specs-grid">
+          <div class="spec-pill-item">
+            <span class="spec-label">🧠 Architecture</span>
+            <strong id="inspect-spec-arch">--</strong>
+          </div>
+          <div class="spec-pill-item">
+            <span class="spec-label">⚡ Parameters</span>
+            <strong id="inspect-spec-params">--</strong>
+          </div>
+          <div class="spec-pill-item">
+            <span class="spec-label">💾 Download / File Size</span>
+            <strong id="inspect-spec-size">--</strong>
+          </div>
+          <div class="spec-pill-item">
+            <span class="spec-label">📏 Context Window</span>
+            <strong id="inspect-spec-ctx">--</strong>
+          </div>
+          <div class="spec-pill-item">
+            <span class="spec-label">📜 License</span>
+            <strong id="inspect-spec-license">--</strong>
+          </div>
+          <div class="spec-pill-item">
+            <span class="spec-label">🎯 Primary Task</span>
+            <strong id="inspect-spec-task">--</strong>
+          </div>
+          <div class="spec-pill-item spec-pill-hardware">
+            <span class="spec-label">🖥️ Hardware Requirement</span>
+            <strong id="inspect-spec-vram">--</strong>
+          </div>
+        </div>
+
+        <!-- Description & Capabilities -->
+        <div class="inspect-section">
+          <div class="inspect-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Model Overview &amp; Capabilities
+          </div>
+          <p id="inspect-modal-desc" class="modal-desc">Loading model overview...</p>
+        </div>
+
+        <!-- Tags Cloud -->
+        <div class="inspect-section" id="inspect-tags-section">
+          <div class="inspect-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+            Keywords &amp; Domain Tags
+          </div>
+          <div id="inspect-tags-list" class="tags-cloud"></div>
+        </div>
+
+        <!-- GGUF Quantization Table -->
+        <div class="quant-selection-area">
+          <div class="quant-header-row">
+            <h4>Available GGUF Weights &amp; Quantizations</h4>
+            <span class="quant-guide-hint">Choose a quantization tier. <strong>Q4_K_M</strong> offers the optimal speed, memory, and reasoning balance.</span>
+          </div>
+          <div id="inspect-files-list" class="files-list">
+            <div class="loading-spinner">Fetching available GGUF quantizations from source...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeInspectModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Local GGUF Modal -->
+  <div id="modal-import-local" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Import Local .GGUF File</h3>
+        <button class="btn-close" onclick="closeImportModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="import-file-path">Full Path to .GGUF File on Disk:</label>
+          <input type="text" id="import-file-path" placeholder="e.g. C:\Users\YourName\Downloads\model.gguf" />
+          <div class="param-hint">Point to any .gguf file downloaded from Hugging Face or another source.</div>
+        </div>
+        <div class="form-group">
+          <label for="import-model-name">Model Name in Studio:</label>
+          <input type="text" id="import-model-name" placeholder="e.g. my-custom-model" />
+        </div>
+        <div class="form-group">
+          <label for="import-ctx-len">Context Window:</label>
+          <select id="import-ctx-len" class="select-dropdown">
+            <option value="4096" selected>4,096 tokens</option>
+            <option value="8192">8,192 tokens</option>
+            <option value="16384">16,384 tokens</option>
+            <option value="32768">32,768 tokens</option>
+          </select>
+        </div>
+        <div id="import-status-msg" class="import-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeImportModal()">Cancel</button>
+        <button id="btn-submit-import" class="btn-primary">Register Model</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create / Edit Project Modal -->
+  <div id="modal-project" class="modal-backdrop hidden" onclick="if(event.target === this) closeProjectModal()">
+    <div class="modal-card modal-card-project">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <div class="modal-header-icon-box">
+            <span style="font-size: 1.35rem;">📁</span>
+          </div>
+          <div class="modal-header-text">
+            <h3 id="modal-project-title">Create New Project</h3>
+            <p class="modal-header-subtitle">Group related chats with dedicated instructions and models.</p>
+          </div>
+        </div>
+        <button class="btn-close" onclick="closeProjectModal()" type="button" title="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="project-form-id" value="" />
+        <div class="form-group">
+          <label for="project-form-name">
+            <span>Project Name</span>
+            <span class="label-required">*Required</span>
+          </label>
+          <input type="text" id="project-form-name" class="input-text" placeholder="e.g. Python Architect, Document Analysis, Web Scraper" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="project-form-desc">
+            <span>Description</span>
+            <span class="label-optional">(Optional)</span>
+          </label>
+          <input type="text" id="project-form-desc" class="input-text" placeholder="Brief summary of what this project workspace handles" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="project-form-model">
+            <span>Assigned Model</span>
+            <span class="label-optional">(Optional)</span>
+          </label>
+          <div class="select-wrapper">
+            <select id="project-form-model" class="select-dropdown">
+              <option value="">(Inherit Running Model)</option>
+            </select>
+          </div>
+          <div class="param-hint">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <span>ModelDock automatically switches to this model when chatting in this project.</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="project-form-instructions">
+            <span>Custom System Instructions</span>
+            <span class="label-optional">(Optional)</span>
+          </label>
+          <textarea id="project-form-instructions" class="input-textarea" rows="4" placeholder="e.g. You are an expert software architect. Always provide clean, production-grade code with docstrings, type annotations, and unit tests."></textarea>
+          <div class="param-hint">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <span>Automatically applied as system prompt to all conversations in this project.</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button id="btn-delete-project" class="btn-danger hidden" onclick="deleteCurrentProject()" type="button" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          <span>Delete Project</span>
+        </button>
+        <div class="modal-footer-actions" style="display: flex; gap: 0.6rem; margin-left: auto;">
+          <button class="btn-secondary" onclick="closeProjectModal()" type="button">Cancel</button>
+          <button id="btn-save-project" class="btn-primary" onclick="saveProjectFromModal()" type="button" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Save &amp; Start Chat</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Model Alias Customization Modal -->
+  <div id="modal-model-alias" class="modal-backdrop hidden" onclick="if(event.target === this) closeModelAliasModal()">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span style="font-size: 1.25rem;">🏷️</span>
+          <h3>Set Model Alias</h3>
+        </div>
+        <button class="btn-close" onclick="closeModelAliasModal()" title="Close">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 1.25rem 1.5rem;">
+        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem; line-height: 1.45;">
+          Give this model a friendly display nickname. The alias will replace the long filename across the Chat selector, navbar, message badges, and library.
+        </p>
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.35rem;">Original Model File</label>
+          <input type="text" id="alias-model-original-name" class="input-text" readonly style="background: rgba(255,255,255,0.03); opacity: 0.8; font-family: monospace; font-size: 0.8rem; cursor: not-allowed; width: 100%; box-sizing: border-box;" />
+        </div>
+        <div class="form-group" style="margin-bottom: 0.5rem;">
+          <label for="alias-model-input" style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; margin-bottom: 0.35rem;">Custom Friendly Alias</label>
+          <input type="text" id="alias-model-input" class="input-text" placeholder="e.g. Qwen 2.5 Coder 7B, DeepSeek R1, Fast Chat 0.5B..." autofocus autocomplete="off" style="width: 100%; box-sizing: border-box;" />
+          <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; display: block;">Leave blank or click Revert to restore the default filename.</span>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem;">
+        <button type="button" class="btn-danger btn-sm" onclick="clearModelAlias()" id="btn-clear-alias" title="Remove alias and revert to default filename">
+          Revert to Default
+        </button>
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" class="btn-secondary btn-sm" onclick="closeModelAliasModal()">Cancel</button>
+          <button type="button" class="btn-primary btn-sm" onclick="saveModelAlias()">Save Alias</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model Specifications & Details Modal -->
+  <div id="modal-model-details" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <div class="modal-header-info">
+          <div class="modal-title-row">
+            <img src="/static/logo.svg" onerror="this.onerror=null; this.src='/static/logo.png';" alt="Logo" class="modal-logo-img" />
+            <h3 id="md-title">Model Specifications</h3>
+          </div>
+          <div class="modal-subtitle-tags">
+            <span id="md-badge-arch" class="badge badge-cyan">Architecture</span>
+            <span id="md-badge-quant" class="badge">Quant</span>
+            <span id="md-badge-params" class="badge badge-success">Size</span>
+            <span id="md-badge-version" class="badge">GGUF v3</span>
+          </div>
+        </div>
+        <button class="btn-close" onclick="closeModelDetailsModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Architecture & Hyperparameters Grid -->
+        <div class="details-section">
+          <div class="details-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line></svg>
+            Neural Architecture & Hyperparameters
+          </div>
+          <div class="specs-grid">
+            <div class="spec-tile">
+              <span class="spec-tile-label">Context Window</span>
+              <span class="spec-tile-val" id="md-ctx">--</span>
+              <span class="spec-tile-sub">Maximum token capacity</span>
+            </div>
+            <div class="spec-tile">
+              <span class="spec-tile-label">Layer Depth</span>
+              <span class="spec-tile-val" id="md-layers">--</span>
+              <span class="spec-tile-sub">Transformer blocks</span>
+            </div>
+            <div class="spec-tile">
+              <span class="spec-tile-label">Embedding Dim</span>
+              <span class="spec-tile-val" id="md-embed">--</span>
+              <span class="spec-tile-sub">Hidden dimension size</span>
+            </div>
+            <div class="spec-tile">
+              <span class="spec-tile-label">Attention Heads</span>
+              <span class="spec-tile-val" id="md-heads">--</span>
+              <span class="spec-tile-sub" id="md-heads-sub">Query / KV heads</span>
+            </div>
+            <div class="spec-tile">
+              <span class="spec-tile-label">Feed-Forward Dim</span>
+              <span class="spec-tile-val" id="md-ffn">--</span>
+              <span class="spec-tile-sub">MLP intermediate dim</span>
+            </div>
+            <div class="spec-tile">
+              <span class="spec-tile-label">Tensor Count</span>
+              <span class="spec-tile-val" id="md-tensors">--</span>
+              <span class="spec-tile-sub">Compiled weight buffers</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hardware & VRAM Footprint -->
+        <div class="details-section">
+          <div class="details-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            Hardware & VRAM Recommendations
+          </div>
+          <div class="vram-recommendation-card">
+            <div class="vram-card-icon">⚡</div>
+            <div class="vram-card-content">
+              <strong id="md-vram-text">Calculating VRAM requirement...</strong>
+              <p id="md-vram-sub">Offload recommendation computed from tensor weights + KV cache footprint.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Storage & File Location -->
+        <div class="details-section">
+          <div class="details-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            Disk Location & Storage
+          </div>
+          <div class="file-path-row">
+            <input type="text" id="md-filepath" readonly class="path-input" />
+            <button class="btn-secondary btn-sm" id="btn-copy-model-path" onclick="copyModelPath()" title="Copy Path to Clipboard">📋 Copy</button>
+            <button class="btn-secondary btn-sm" id="btn-reveal-model-file" onclick="revealModelFile()" title="Highlight in Windows File Explorer">📁 Reveal</button>
+          </div>
+          <div class="path-meta-row">
+            <span>Disk Size: <strong id="md-filesize">--</strong></span>
+            <span id="md-copy-feedback" class="copy-feedback"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModelDetailsModal()">Close</button>
+        <button class="btn-primary" id="btn-run-from-modal" onclick="runActiveModalModel()">
+          Run in Chat 💬
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts (Versioned to Prevent Browser Caching) -->
+  <script src="/static/js/app.js?v=3.9.0"></script>
+  <script src="/static/js/monitor.js?v=3.9.0"></script>
+  <script src="/static/js/auth.js?v=3.9.0"></script>
+  <script src="/static/js/hf_hub.js?v=3.9.0"></script>
+  <script src="/static/js/models.js?v=3.9.0"></script>
+  <script src="/static/js/chat.js?v=3.9.0"></script>
+  <script src="/static/js/settings.js?v=3.9.0"></script>
+</body>
+</html>

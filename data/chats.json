@@ -1,0 +1,14 @@
+{
+  "sessions": [],
+  "projects": [
+    {
+      "id": "proj_default",
+      "name": "Code & Analysis Workspace",
+      "description": "Project workspace for software engineering, deep reasoning, and document workflows.",
+      "icon": "📁",
+      "model": "",
+      "systemPrompt": "You are an expert technical AI assistant. Deliver concise, well-structured answers with clean code examples, type annotations, and architectural best practices.",
+      "createdAt": 1794334229938
+    }
+  ]
+}
