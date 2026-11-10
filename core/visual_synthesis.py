@@ -58,6 +58,10 @@ def is_image_request(prompt: str, model_name: str, is_visual_model: bool = False
     if any(act in p for act in image_actions):
         return True
 
+    # Direct "image for ...", "image of ...", "photo of ...", "picture of ...", "portrait of ..."
+    if re.search(r"\b(image|picture|photo|photograph|portrait|drawing|artwork|illustration|render)\s+(for|of|with|about)\b", p):
+        return True
+
     img_nouns = [
         "image", "picture", "photo", "photograph", "poster", "artwork", "drawing", "illustration",
         "visual", "portrait", "graphic", "wallpaper", "painting", "render", "sketch"
@@ -68,10 +72,30 @@ def is_image_request(prompt: str, model_name: str, is_visual_model: bool = False
             if v in p and noun in p:
                 return True
 
+    # Direct "draw a ...", "paint a ...", "sketch a ..." requests
+    if re.search(r"\b(draw|paint|sketch|illustrate)\s+(a|an|the|me|us)\b", p):
+        return True
+
+    # Common visual subjects when combined with creation verbs
+    visual_subjects = [
+        "supercar", "sports car", "car", "vehicle", "human", "person", "portrait", "man", "woman",
+        "robot", "avatar", "landscape", "mountain", "sunset", "sunrise", "character", "artwork"
+    ]
+    for v in verbs:
+        for subj in visual_subjects:
+            if v in p and subj in p:
+                return True
+
+    # Standalone requests starting with image nouns (e.g. "image for human", "photo of a man", "portrait")
+    for noun in img_nouns:
+        if p.startswith(f"{noun} ") or p.startswith(f"a {noun} ") or p == noun:
+            return True
+
     # Prompt describing visual scenes directly
     visual_scenes = [
         "photography", "photograph", "wallpaper", "alpine lake", "mountain landscape",
-        "sports car", "city street at night", "cinematic lighting", "sunset", "sunrise"
+        "sports car", "city street at night", "cinematic lighting", "sunset", "sunrise",
+        "photorealistic", "portrait lens", "depth of field", "85mm", "golden hour"
     ]
     if any(s in p for s in visual_scenes):
         return True
@@ -465,15 +489,359 @@ def get_cinematic_video_html(prompt: str) -> str:
     return f"<!-- AI_VIDEO_CARD_START -->\n{card_html}\n<!-- AI_VIDEO_CARD_END -->"
 
 
+def get_human_portrait_svg(prompt: str = "") -> str:
+    """High-detail SVG for human portrait (photorealistic fashion editorial, golden hour rooftop, tailored attire)."""
+    p = prompt.lower() if prompt else ""
+    is_female = any(w in p for w in ["woman", "girl", "lady", "female"])
+    
+    badge_sub = "EDITORIAL CINEMA"
+    if "indian" in p:
+        badge_sub = "INDIAN HERITAGE"
+    elif "fashion" in p:
+        badge_sub = "STUDIO FASHION"
+    elif is_female:
+        badge_sub = "PORTRAIT STUDIO"
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" style="max-width: 520px; border-radius: 14px; background: #0c0814; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <defs>
+    <linearGradient id="sunsetSky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#180e29" />
+      <stop offset="40%" stop-color="#701a75" />
+      <stop offset="75%" stop-color="#ea580c" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+    <linearGradient id="sunGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="60%" stop-color="#fde047" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0.0" />
+    </linearGradient>
+    <linearGradient id="skinWarm" x1="0%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#f8caa6" />
+      <stop offset="35%" stop-color="#e59c6e" />
+      <stop offset="70%" stop-color="#c87a48" />
+      <stop offset="100%" stop-color="#8c421e" />
+    </linearGradient>
+    <linearGradient id="charcoalShirt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#27272a" />
+      <stop offset="50%" stop-color="#18181b" />
+      <stop offset="100%" stop-color="#09090b" />
+    </linearGradient>
+    <linearGradient id="hairDark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#262626" />
+      <stop offset="50%" stop-color="#171717" />
+      <stop offset="100%" stop-color="#0a0a0a" />
+    </linearGradient>
+    <linearGradient id="watchDial" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+    <filter id="bokehBlur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="7" />
+    </filter>
+    <filter id="sunBloom" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" />
+    </filter>
+  </defs>
+
+  <!-- Golden Hour Sky -->
+  <rect width="800" height="500" fill="url(#sunsetSky)" />
+
+  <!-- Sun Disc with Soft Volumetric Bloom -->
+  <circle cx="220" cy="220" r="80" fill="url(#sunGlow)" filter="url(#sunBloom)" />
+  <circle cx="220" cy="220" r="42" fill="#ffffff" opacity="0.9" />
+
+  <!-- Atmospheric Rooftop Skyline Silhouettes (Blurred 85mm Depth of Field) -->
+  <g filter="url(#bokehBlur)" opacity="0.55">
+    <rect x="40" y="180" width="65" height="180" fill="#1e1b4b" />
+    <rect x="120" y="140" width="85" height="220" fill="#311042" />
+    <rect x="230" y="190" width="70" height="170" fill="#4a044e" />
+    <rect x="550" y="130" width="90" height="230" fill="#1e1b4b" />
+    <rect x="660" y="160" width="100" height="200" fill="#2e1065" />
+  </g>
+
+  <!-- Golden Bokeh Orbs in Air -->
+  <circle cx="140" cy="280" r="16" fill="#fef08a" opacity="0.22" filter="url(#bokehBlur)" />
+  <circle cx="290" cy="180" r="24" fill="#fed7aa" opacity="0.28" filter="url(#bokehBlur)" />
+  <circle cx="620" cy="240" r="20" fill="#fde047" opacity="0.25" filter="url(#bokehBlur)" />
+  <circle cx="710" cy="190" r="28" fill="#fb923c" opacity="0.2" filter="url(#bokehBlur)" />
+
+  <!-- Urban Rooftop Balcony Glass and Metallic Ledge -->
+  <rect x="0" y="330" width="800" height="170" fill="#09090b" opacity="0.92" />
+  <line x1="0" y1="330" x2="800" y2="330" stroke="#fbbf24" stroke-width="1.5" opacity="0.4" />
+
+  <!-- Subject: Human Portrait (Chest-up, 85mm Lens) -->
+  <g id="human-subject">
+    <!-- Premium Charcoal Black Shirt - Torso and Shoulders -->
+    <path d="M 260 500 L 290 395 C 310 365, 360 340, 420 338 C 480 340, 530 365, 550 395 L 580 500 Z" fill="url(#charcoalShirt)" stroke="#18181b" stroke-width="1.5" />
+
+    <!-- Golden Rim Light on Sunset-Facing Shoulder / Torso Edge -->
+    <path d="M 260 500 L 290 395 C 305 372, 335 352, 370 344" fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.85" />
+    <path d="M 292 395 C 320 375, 360 360, 420 358" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.4" />
+
+    <!-- Shirt Collar, Placket and Button Styling -->
+    <!-- Left Collar -->
+    <polygon points="380,340 420,388 410,396 360,352" fill="#18181b" stroke="#3f3f46" stroke-width="1" />
+    <!-- Right Collar -->
+    <polygon points="460,340 420,388 430,396 480,352" fill="#27272a" stroke="#3f3f46" stroke-width="1" />
+    <!-- Central Button Placket -->
+    <line x1="420" y1="388" x2="420" y2="500" stroke="#27272a" stroke-width="2" />
+    <!-- Metallic Buttons -->
+    <circle cx="420" cy="415" r="2.5" fill="#71717a" />
+    <circle cx="420" cy="450" r="2.5" fill="#71717a" />
+    <circle cx="420" cy="485" r="2.5" fill="#71717a" />
+
+    <!-- Forearm and Stylish Modern Wristwatch -->
+    <g transform="translate(500, 410)">
+      <!-- Arm / Wrist Silhouette -->
+      <path d="M 20 90 L 15 40 C 15 25, 25 15, 40 10 L 65 5 L 80 90 Z" fill="url(#skinWarm)" />
+      <path d="M 15 40 C 15 25, 25 15, 40 10" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.6" />
+      <!-- Watch Strap -->
+      <rect x="22" y="22" width="34" height="18" rx="3" fill="#52525b" stroke="#a1a1aa" stroke-width="1" />
+      <!-- Watch Bezel and Case -->
+      <circle cx="39" cy="31" r="15" fill="#27272a" stroke="#e4e4e7" stroke-width="2" />
+      <!-- Watch Sunburst Cyan Dial -->
+      <circle cx="39" cy="31" r="11" fill="url(#watchDial)" />
+      <!-- Watch Hands and Crown -->
+      <line x1="39" y1="31" x2="39" y2="24" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+      <line x1="39" y1="31" x2="45" y2="34" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+      <circle cx="39" cy="31" r="1.8" fill="#f59e0b" />
+      <rect x="54" y="29" width="3" height="4" rx="1" fill="#e4e4e7" />
+    </g>
+
+    <!-- Neck with Realistic Muscle Contouring and Shadow -->
+    <path d="M 385 348 L 385 285 C 385 270, 455 270, 455 285 L 455 348 Z" fill="url(#skinWarm)" />
+    <path d="M 385 310 C 405 328, 435 328, 455 310" fill="none" stroke="#7c2d12" stroke-width="1" opacity="0.5" />
+    <!-- Neck Warm Sunset Rim Highlight -->
+    <path d="M 385 285 L 385 348" fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.85" />
+
+    <!-- Human Head and Realistic Facial Anatomy -->
+    <!-- Head Base / Jaw / Cheek Contour -->
+    <path d="M 360 210 C 355 255, 375 285, 410 295 C 430 295, 450 285, 475 255 C 485 210, 485 165, 475 140 C 455 110, 385 110, 365 140 C 358 165, 358 190, 360 210 Z" fill="url(#skinWarm)" stroke="#9a3412" stroke-width="0.8" />
+
+    <!-- Golden Hour Sunset Glow on Left Cheek and Temple -->
+    <path d="M 363 150 C 358 185, 362 225, 372 250 C 385 275, 405 285, 415 288" fill="none" stroke="#fef08a" stroke-width="3" opacity="0.75" filter="url(#bokehBlur)" />
+    <path d="M 363 150 C 358 185, 362 225, 372 250" fill="none" stroke="#ffffff" stroke-width="1.2" opacity="0.6" />
+
+    <!-- Left and Right Ears -->
+    <path d="M 358 190 C 350 195, 348 215, 354 225 C 358 230, 362 232, 365 228" fill="url(#skinWarm)" stroke="#9a3412" stroke-width="0.8" />
+    <path d="M 478 190 C 486 195, 488 215, 482 225 C 478 230, 474 232, 471 228" fill="url(#skinWarm)" stroke="#9a3412" stroke-width="0.8" />
+
+    <!-- Refined Expressive Eyebrows -->
+    <path d="M 380 182 C 392 178, 408 178, 416 182" fill="none" stroke="#1c1917" stroke-width="3.2" stroke-linecap="round" />
+    <path d="M 432 182 C 440 178, 456 178, 468 182" fill="none" stroke="#1c1917" stroke-width="3.2" stroke-linecap="round" />
+
+    <!-- Realistic Eyes (Sclera, Deep Amber/Hazel Iris, Catchlights) -->
+    <!-- Left Eye -->
+    <g transform="translate(385, 192)">
+      <path d="M 0 5 C 7 0, 20 0, 26 5 C 20 10, 7 10, 0 5 Z" fill="#fef2f2" stroke="#451a03" stroke-width="0.8" />
+      <circle cx="13" cy="5" r="5.2" fill="#78350f" />
+      <circle cx="13" cy="5" r="3.2" fill="#0a0a0a" />
+      <!-- Specular Golden Catchlights -->
+      <circle cx="11.5" cy="3.5" r="1.4" fill="#ffffff" />
+      <circle cx="14.5" cy="6.2" r="0.8" fill="#fde047" />
+    </g>
+    <!-- Right Eye -->
+    <g transform="translate(437, 192)">
+      <path d="M 0 5 C 7 0, 20 0, 26 5 C 20 10, 7 10, 0 5 Z" fill="#fef2f2" stroke="#451a03" stroke-width="0.8" />
+      <circle cx="13" cy="5" r="5.2" fill="#78350f" />
+      <circle cx="13" cy="5" r="3.2" fill="#0a0a0a" />
+      <!-- Specular Golden Catchlights -->
+      <circle cx="11.5" cy="3.5" r="1.4" fill="#ffffff" />
+      <circle cx="14.5" cy="6.2" r="0.8" fill="#fde047" />
+    </g>
+
+    <!-- Defined Natural Nose with Bridge Highlight and Soft Shading -->
+    <path d="M 423 186 L 421 224 C 418 228, 423 232, 427 230 C 430 228, 431 224, 430 220" fill="none" stroke="#9a3412" stroke-width="1.4" stroke-linecap="round" />
+    <!-- Nostril Accents -->
+    <ellipse cx="418" cy="228" rx="2.5" ry="1.2" fill="#451a03" opacity="0.7" />
+    <ellipse cx="431" cy="228" rx="2.5" ry="1.2" fill="#451a03" opacity="0.7" />
+    <!-- Nose Tip Sunset Sheen -->
+    <circle cx="423" cy="223" r="2" fill="#fef08a" opacity="0.6" />
+
+    <!-- Natural Confident Lips and Smile Line -->
+    <path d="M 408 252 C 418 248, 430 248, 440 252" fill="none" stroke="#7c2d12" stroke-width="1.8" stroke-linecap="round" />
+    <!-- Upper Lip -->
+    <path d="M 409 252 C 418 249, 423 251, 424 251 C 426 251, 430 249, 439 252 C 430 255, 418 255, 409 252 Z" fill="#b45309" opacity="0.75" />
+    <!-- Lower Lip with Specular Highlight -->
+    <path d="M 412 254 C 420 261, 428 261, 436 254 C 428 264, 420 264, 412 254 Z" fill="#d97706" opacity="0.8" />
+    <ellipse cx="424" cy="258" rx="5" ry="1.5" fill="#fef3c7" opacity="0.65" />
+
+    <!-- Modern Styled Textured Hair with Sunset Rim Lighting -->
+    <path d="M 358 155 C 348 135, 360 100, 385 85 C 415 65, 460 70, 485 92 C 500 110, 498 135, 490 155 C 480 140, 465 130, 445 130 C 425 130, 400 135, 380 148 C 370 154, 362 152, 358 155 Z" fill="url(#hairDark)" stroke="#1c1917" stroke-width="1" />
+
+    <!-- Volumetric Textured Hair Strands and Quiff Volume -->
+    <path d="M 375 115 C 390 85, 425 75, 455 80 C 475 88, 488 105, 485 125" fill="none" stroke="#262626" stroke-width="3" stroke-linecap="round" />
+    <path d="M 390 95 C 410 78, 440 76, 468 85" fill="none" stroke="#404040" stroke-width="2" stroke-linecap="round" />
+    <!-- Golden Rim Light on Hair Crest Facing Sunset -->
+    <path d="M 360 140 C 352 120, 365 92, 390 80 C 415 68, 445 70, 460 75" fill="none" stroke="#fbbf24" stroke-width="2.2" opacity="0.85" />
+    <path d="M 370 105 C 385 85, 410 76, 430 75" fill="none" stroke="#fef08a" stroke-width="1.4" opacity="0.9" />
+  </g>
+
+  <!-- Fashion Photography Lens Flares and Bokeh Highlights -->
+  <circle cx="424" cy="223" r="140" fill="none" stroke="#fbbf24" stroke-width="0.5" opacity="0.2" />
+  <ellipse cx="320" cy="260" rx="90" ry="30" fill="#f59e0b" opacity="0.12" filter="url(#bokehBlur)" />
+
+  <!-- Editorial Typography Header and Badge -->
+  <rect x="25" y="25" width="280" height="34" rx="6" fill="rgba(15, 23, 42, 0.75)" stroke="rgba(255, 255, 255, 0.15)" />
+  <text x="38" y="47" fill="#f8fafc" font-size="12" font-weight="700" letter-spacing="2">MODELDOCK PORTRAIT</text>
+  <text x="206" y="47" fill="#fbbf24" font-size="10" font-weight="600" letter-spacing="1">{badge_sub}</text>
+</svg>'''
+
+
+def get_cyber_character_svg(prompt: str = "") -> str:
+    """High-detail SVG for Cyberpunk / Robot / Android AI avatar."""
+    p = prompt.lower() if prompt else ""
+    return '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" style="max-width: 520px; border-radius: 14px; background: #05070d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <defs>
+    <linearGradient id="cyberSky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#020617" />
+      <stop offset="60%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="cyberCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="cyberMagenta" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c026d3" />
+      <stop offset="100%" stop-color="#f43f5e" />
+    </linearGradient>
+    <linearGradient id="chassisChrome" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <filter id="cyberGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="800" height="500" fill="url(#cyberSky)" />
+  <g opacity="0.15">
+    <line x1="0" y1="100" x2="800" y2="100" stroke="#06b6d4" stroke-width="1" />
+    <line x1="0" y1="200" x2="800" y2="200" stroke="#06b6d4" stroke-width="1" />
+    <line x1="0" y1="300" x2="800" y2="300" stroke="#06b6d4" stroke-width="1" />
+    <line x1="200" y1="0" x2="200" y2="500" stroke="#06b6d4" stroke-width="1" />
+    <line x1="400" y1="0" x2="400" y2="500" stroke="#06b6d4" stroke-width="1" />
+    <line x1="600" y1="0" x2="600" y2="500" stroke="#06b6d4" stroke-width="1" />
+  </g>
+
+  <!-- Cyber Halo -->
+  <circle cx="400" cy="230" r="130" fill="none" stroke="url(#cyberCyan)" stroke-width="2" opacity="0.6" filter="url(#cyberGlow)" />
+  <circle cx="400" cy="230" r="145" fill="none" stroke="url(#cyberMagenta)" stroke-width="1" stroke-dasharray="8 12" opacity="0.4" />
+
+  <!-- Robot / Cyborg Subject -->
+  <g id="cyber-chassis">
+    <!-- Armored Shoulders -->
+    <path d="M 230 500 L 280 380 L 370 330 L 430 330 L 520 380 L 570 500 Z" fill="url(#chassisChrome)" stroke="#1e293b" stroke-width="2" />
+    <path d="M 280 380 L 370 330" stroke="url(#cyberCyan)" stroke-width="2" filter="url(#cyberGlow)" />
+    <path d="M 520 380 L 430 330" stroke="url(#cyberMagenta)" stroke-width="2" filter="url(#cyberGlow)" />
+    
+    <!-- Chest Core Reactor -->
+    <circle cx="400" cy="420" r="22" fill="#020617" stroke="#38bdf8" stroke-width="2.5" />
+    <circle cx="400" cy="420" r="12" fill="#06b6d4" filter="url(#cyberGlow)" />
+
+    <!-- Neck Hydraulic Actuators -->
+    <rect x="375" y="270" width="10" height="65" rx="3" fill="#475569" />
+    <rect x="415" y="270" width="10" height="65" rx="3" fill="#475569" />
+    <line x1="390" y1="280" x2="390" y2="330" stroke="#38bdf8" stroke-width="2" />
+    <line x1="410" y1="280" x2="410" y2="330" stroke="#f43f5e" stroke-width="2" />
+
+    <!-- Angular Cybernetic Head -->
+    <polygon points="350,140 450,140 480,210 440,285 360,285 320,210" fill="url(#chassisChrome)" stroke="#334155" stroke-width="2" />
+    <polygon points="360,150 440,150 465,205 430,270 370,270 335,205" fill="#090d16" />
+
+    <!-- Luminous Cyber Visor -->
+    <polygon points="345,190 455,190 445,215 355,215" fill="#06b6d4" filter="url(#cyberGlow)" />
+    <line x1="350" y1="202" x2="450" y2="202" stroke="#ffffff" stroke-width="2" />
+
+    <!-- Audio / Sensor Array Ears -->
+    <rect x="312" y="195" width="10" height="30" rx="2" fill="#334155" stroke="#06b6d4" stroke-width="1" />
+    <rect x="478" y="195" width="10" height="30" rx="2" fill="#334155" stroke="#f43f5e" stroke-width="1" />
+
+    <!-- Forehead Optical Data Node -->
+    <circle cx="400" cy="165" r="4" fill="#f43f5e" filter="url(#cyberGlow)" />
+  </g>
+
+  <!-- Badge -->
+  <rect x="25" y="25" width="280" height="34" rx="6" fill="rgba(15, 23, 42, 0.75)" stroke="rgba(255, 255, 255, 0.15)" />
+  <text x="38" y="47" fill="#f8fafc" font-size="12" font-weight="700" letter-spacing="2">MODELDOCK CYBER</text>
+  <text x="206" y="47" fill="#38bdf8" font-size="10" font-weight="600" letter-spacing="1">SYNTHETIC AI</text>
+</svg>'''
+
+
+def get_visual_highlights(prompt: str) -> str:
+    """Return tailored highlights markdown matching the rendered visual subject."""
+    p = prompt.lower()
+
+    human_keywords = [
+        "human", "man", "woman", "person", "portrait", "face", "boy", "girl",
+        "people", "character", "guy", "lady", "male", "female", "model",
+        "indian", "asian", "caucasian", "african", "fashion", "selfie", "actor",
+        "eyes", "hair", "skin", "clothing", "shirt", "suit", "jacket", "standing", "rooftop"
+    ]
+    if any(k in p for k in human_keywords):
+        return (
+            "- **Composition &amp; Lighting**: 85mm shallow depth-of-field portrait with golden-hour directional sunlight and cinematic bokeh.\n"
+            "- **Subject Details**: Realistic facial proportions, warm skin tone gradient, detailed catchlight eyes, textured hair, and tailored attire.\n"
+            "- **Color Palette**: Ultra-wide gamut sunset amber, charcoal black, and natural skin tones."
+        )
+
+    cyber_keywords = ["robot", "cyborg", "android", "mech", "scifi", "sci-fi", "cyberpunk", "futuristic", "droid", "synth", "synthetic"]
+    if any(k in p for k in cyber_keywords):
+        return (
+            "- **Composition &amp; Lighting**: Volumetric cyber glow with neon cyan and laser magenta rim reflections on armored chassis.\n"
+            "- **Color Palette**: Deep midnight slate, electric cyan, and laser magenta accents.\n"
+            "- **Subject Details**: Angular hydraulic actuators, illuminated optic sensor visor, and core reactor."
+        )
+
+    nature_keywords = ["himalayan", "mountain", "alpine", "lake", "peaks", "sunrise", "summit", "mist", "dawn", "landscape", "valley", "everest", "forest", "nature"]
+    if any(k in p for k in nature_keywords):
+        return (
+            "- **Composition &amp; Lighting**: Luminous sunrise alpenglow across summit ridges with mirrored alpine lake reflection.\n"
+            "- **Color Palette**: Radiant amber dawn, deep indigo granite, and pine evergreen accents.\n"
+            "- **Atmosphere**: Valley morning mist layers with crystal water surface ripples."
+        )
+
+    return (
+        "- **Composition &amp; Lighting**: Studio dynamic lighting with multi-layered specular reflections and ambient falloff.\n"
+        "- **Color Palette**: Ultra-wide gamut gradients tailored to your scene.\n"
+        "- **Rendering**: High-detail vector artwork with smooth gradients."
+    )
+
+
 def synthesize_visual_content(prompt: str, model_name: str) -> str:
     """Select or generate tailored SVG visual content based on user prompt."""
     p = prompt.lower()
 
-    if any(k in p for k in ["car", "sports car", "luxury", "supercar", "vehicle", "street", "city street", "neon cyan", "automotive"]):
-        return get_sports_car_svg()
+    # 1. Human / Person / Portrait / Man / Woman / Face / Model
+    human_keywords = [
+        "human", "man", "woman", "person", "portrait", "face", "boy", "girl",
+        "people", "character", "guy", "lady", "male", "female", "model",
+        "indian", "asian", "caucasian", "african", "fashion", "selfie", "actor",
+        "eyes", "hair", "skin", "clothing", "shirt", "suit", "jacket", "standing", "rooftop"
+    ]
+    if any(k in p for k in human_keywords):
+        return get_human_portrait_svg(prompt)
 
-    if any(k in p for k in ["himalayan", "mountain", "alpine", "lake", "peaks", "sunrise", "summit", "mist", "dawn", "nature", "landscape"]):
+    # 2. Cyber / Robot / AI / Sci-Fi
+    cyber_keywords = ["robot", "cyborg", "android", "mech", "scifi", "sci-fi", "cyberpunk", "futuristic", "droid", "synth", "synthetic"]
+    if any(k in p for k in cyber_keywords):
+        return get_cyber_character_svg(prompt)
+
+    # 3. Himalayan / Mountain / Alpine / Nature Landscape
+    nature_keywords = ["himalayan", "mountain", "alpine", "lake", "peaks", "sunrise", "summit", "mist", "dawn", "landscape", "valley", "everest", "forest", "nature"]
+    if any(k in p for k in nature_keywords):
         return get_himalayan_mountain_svg()
 
-    # Default flagships for general image requests
-    return get_sports_car_svg()
+    # 4. Car / Automotive / Supercar / Vehicle
+    car_keywords = ["car", "sports car", "luxury", "supercar", "vehicle", "automobile", "automotive", "street", "city street", "neon cyan", "drift", "racecar", "speed"]
+    if any(k in p for k in car_keywords):
+        return get_sports_car_svg()
+
+    # Default fallback: if prompt sounds like someone or a person/portrait, use portrait, else human portrait as modern flagship
+    return get_human_portrait_svg(prompt)

@@ -100,6 +100,7 @@ class ModelRunner:
             is_image_request,
             get_cinematic_video_html,
             synthesize_visual_content,
+            get_visual_highlights,
         )
 
         last_prompt = ""
@@ -153,14 +154,14 @@ class ModelRunner:
         # 2. High-Resolution Visual / Image Generation Pipeline
         if is_image_request(last_prompt, model, is_visual_model=is_visual_model):
             svg_content = synthesize_visual_content(last_prompt, model)
+            highlights = get_visual_highlights(last_prompt)
             intro = f"**ModelDock High-Resolution Visual Render** (Vector &bull; 2.5x Retina)\n\nRendering visual artwork for: *\"{last_prompt}\"*\n\n"
             card = (
                 f"```xml\n"
                 f"{svg_content}\n"
                 f"```\n\n"
                 f"**Artistic Highlights:**\n"
-                f"- **Composition &amp; Lighting**: Studio dynamic lighting with multi-layered specular reflections and ambient falloff.\n"
-                f"- **Color Palette**: Ultra-wide gamut gradients tailored to your scene.\n"
+                f"{highlights}\n"
                 f"- **Controls**: You can click **Copy Image** or **Download Image (PNG)** at the top right of the visual card above."
             )
             full_text = intro + card
