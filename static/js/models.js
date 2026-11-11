@@ -87,10 +87,43 @@ async function loadLocalModels() {
           })
           .join("");
 
-        if (prevValue && AppState.localModels.some((m) => m.name === prevValue)) {
-          chatSelect.value = prevValue;
-        } else {
-          chatSelect.value = AppState.localModels[0].name;
+        // Priority for persistent model selection:
+        // 1. Current active chat session's assigned model
+        const activeSess = (typeof getActiveSession === "function") ? getActiveSession() : null;
+        const sessionModel = activeSess && activeSess.model;
+
+        // 2. Globally remembered model in localStorage
+        const storedModel = localStorage.getItem("modeldock_active_model") || localStorage.getItem("omnimodel_active_model");
+
+        // 3. Project model if chatting in a project
+        let projectModel = null;
+        if (activeSess && activeSess.projectId && typeof getProject === "function") {
+          const proj = getProject(activeSess.projectId);
+          if (proj && proj.model) projectModel = proj.model;
+        }
+
+        let targetModel = null;
+        if (sessionModel && AppState.localModels.some((m) => m.name === sessionModel)) {
+          targetModel = sessionModel;
+        } else if (projectModel && AppState.localModels.some((m) => m.name === projectModel)) {
+          targetModel = projectModel;
+        } else if (storedModel && AppState.localModels.some((m) => m.name === storedModel)) {
+          targetModel = storedModel;
+        } else if (prevValue && AppState.localModels.some((m) => m.name === prevValue)) {
+          targetModel = prevValue;
+        } else if (AppState.localModels.length > 0) {
+          targetModel = AppState.localModels[0].name;
+        }
+
+        if (targetModel) {
+          chatSelect.value = targetModel;
+          try {
+            localStorage.setItem("modeldock_active_model", targetModel);
+            if (activeSess && !activeSess.model) {
+              activeSess.model = targetModel;
+              if (typeof saveSessionsToStorage === "function") saveSessionsToStorage();
+            }
+          } catch (e) {}
         }
       }
     }
@@ -172,6 +205,16 @@ async function selectModelAndChat(modelName) {
   if (chatSelect) {
     chatSelect.value = modelName;
   }
+  try {
+    localStorage.setItem("modeldock_active_model", modelName);
+  } catch (e) {}
+
+  const activeSess = (typeof getActiveSession === "function") ? getActiveSession() : null;
+  if (activeSess) {
+    activeSess.model = modelName;
+    if (typeof saveSessionsToStorage === "function") saveSessionsToStorage();
+  }
+
   switchTab("chat");
 
   // Proactively warm up / load model in native engine
@@ -320,23 +363,47 @@ async function showModelDetails(modelName) {
   const ctxEl = document.getElementById("md-ctx");
   if (ctxEl) ctxEl.textContent = model.context_formatted || (model.context_length ? `${model.context_length.toLocaleString()} tokens` : "4,096 tokens");
 
+  const ctxSubEl = document.getElementById("md-ctx-sub");
+  if (ctxSubEl) {
+    ctxSubEl.textContent = model.is_visual ? "Video frames / Native resolution" : "Maximum token capacity";
+  }
+
   const layersEl = document.getElementById("md-layers");
-  if (layersEl) layersEl.textContent = model.block_count ? `${model.block_count} layers` : "N/A";
+  if (layersEl) {
+    if (model.block_count) {
+      layersEl.textContent = model.is_visual ? `${model.block_count} DiT blocks` : `${model.block_count} layers`;
+    } else {
+      layersEl.textContent = "N/A";
+    }
+  }
+
+  const layersSubEl = document.getElementById("md-layers-sub");
+  if (layersSubEl) {
+    layersSubEl.textContent = model.is_visual ? "Diffusion transformer blocks" : "Transformer decoder layers";
+  }
 
   const embedEl = document.getElementById("md-embed");
-  if (embedEl) embedEl.textContent = model.embedding_length ? `${model.embedding_length} dims` : "N/A";
+  if (embedEl) embedEl.textContent = model.embedding_length ? `${model.embedding_length.toLocaleString()} dims` : "N/A";
 
   const headsEl = document.getElementById("md-heads");
   if (headsEl) headsEl.textContent = model.head_count ? `${model.head_count} heads` : "N/A";
 
   const headsSubEl = document.getElementById("md-heads-sub");
-  if (headsSubEl) headsSubEl.textContent = model.head_count_kv ? `${model.head_count_kv} KV heads` : "Standard multi-head";
+  if (headsSubEl) {
+    if (model.head_count_kv) {
+      headsSubEl.textContent = `${model.head_count_kv} KV heads`;
+    } else if (model.is_visual) {
+      headsSubEl.textContent = "Cross-attention heads";
+    } else {
+      headsSubEl.textContent = "Standard multi-head";
+    }
+  }
 
   const ffnEl = document.getElementById("md-ffn");
-  if (ffnEl) ffnEl.textContent = model.feed_forward_length ? `${model.feed_forward_length} dims` : "N/A";
+  if (ffnEl) ffnEl.textContent = model.feed_forward_length ? `${model.feed_forward_length.toLocaleString()} dims` : "N/A";
 
   const tensorsEl = document.getElementById("md-tensors");
-  if (tensorsEl) tensorsEl.textContent = model.tensor_count ? `${model.tensor_count} tensors` : "N/A";
+  if (tensorsEl) tensorsEl.textContent = model.tensor_count ? `${model.tensor_count.toLocaleString()} tensors` : "N/A";
 
   // VRAM & Hardware
   const vramText = document.getElementById("md-vram-text");
@@ -344,7 +411,11 @@ async function showModelDetails(modelName) {
 
   const vramSub = document.getElementById("md-vram-sub");
   if (vramSub) {
-    vramSub.textContent = `Native offload recommendation: Pure standalone llama.cpp binary execution with GPU tensor cores.`;
+    if (model.is_visual) {
+      vramSub.textContent = "Hardware recommendation: Dedicated local GPU acceleration for neural diffusion / video tensor inference.";
+    } else {
+      vramSub.textContent = "Native offload recommendation: Pure standalone llama.cpp binary execution with GPU tensor cores.";
+    }
   }
 
   // Disk location

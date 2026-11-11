@@ -132,24 +132,43 @@ def main():
         wait_for_server(url)
 
     # 3. Create Native Windows Desktop Window
-    window = webview.create_window(
-        title="ModelDock Studio",
-        url=url,
-        width=1240,
-        height=820,
-        min_size=(1000, 680),
-        background_color="#0a0d14",
-    )
+    profile_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelDock" / "desktop_profile"
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
-    # Clean shutdown hook when user closes the window
-    window.events.closed += on_window_closed
+    try:
+        window = webview.create_window(
+            title="ModelDock Studio",
+            url=url,
+            width=1240,
+            height=820,
+            min_size=(1000, 680),
+            background_color="#0a0d14",
+        )
 
-    # 4. Start Windows native GUI loop (WebView2 runtime)
-    webview.start(
-        debug=False,
-        icon=icon_path if os.path.isfile(icon_path) else None,
-        private_mode=False,
-    )
+        # Clean shutdown hook when user closes the window
+        window.events.closed += on_window_closed
+
+        # 4. Start Windows native GUI loop (WebView2 runtime)
+        webview.start(
+            debug=False,
+            icon=icon_path if os.path.isfile(icon_path) else None,
+            private_mode=False,
+            storage_path=str(profile_dir),
+        )
+    except Exception as e:
+        print(f"[!] WebView2 native window error: {e}")
+        print(f"[*] Opening in system browser at: {url}")
+        import webbrowser
+        webbrowser.open(url)
+        # Keep process alive while backend runs
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
     on_window_closed()
 

@@ -114,19 +114,72 @@ class ModelRunner:
             or any(k in model.lower() for k in ["image", "diffusion", "flux", "lumina", "wan", "video", "cogvideo"])
         )
 
-        # 1. Cinematic Video Generation Pipeline
+        # 1. Authentic Local AI Video Generation Pipeline (Direct MP4 & WebP • RTX 4060 GPU)
         if is_video_request(last_prompt, model):
-            video_html = get_cinematic_video_html(last_prompt)
-            intro = f"**ModelDock Studio Cinematic Video Engine** (60 FPS &bull; 1080p Cinema)\n\nGenerating cinematic animation for: *\"{last_prompt}\"*\n\n"
+            from core.local_video_engine import generate_local_video, get_real_video_card_html
+
+            # Resolve subject from current prompt or backwards search through chat history
+            video_prompt = last_prompt
+            clean_cmd = re.sub(
+                r"\b(now|please|can you|generate|create|make|render|produce|video|animation|clip|movie|footage|of|for|about|\d+\s*(?:min|mins|minutes|second|seconds|sec|secs))\b",
+                "",
+                last_prompt,
+                flags=re.IGNORECASE
+            ).strip()
+
+            if len(clean_cmd) < 3:
+                # Meta-command without a concrete subject (e.g. "now generate video of 1 min")
+                for prev_m in reversed(messages[:-1]):
+                    if prev_m.get("role") == "user":
+                        prev_text = prev_m.get("content", "").strip()
+                        prev_clean = re.sub(
+                            r"\b(now|please|can you|generate|create|make|render|produce|video|animation|clip|movie|footage|image|photo|picture|of|for|about|\d+\s*(?:min|mins|minutes|second|seconds|sec|secs))\b",
+                            "",
+                            prev_text,
+                            flags=re.IGNORECASE
+                        ).strip()
+                        if len(prev_clean) >= 3:
+                            video_prompt = f"{prev_text} ({last_prompt})"
+                            break
+
+            disp_title = video_prompt.strip().title()
+            if len(disp_title) > 60:
+                disp_title = disp_title[:57] + "..."
+
+            intro = (
+                f"**ModelDock Studio Local AI Video Engine** (Direct MP4 • 100% Local GPU)\n\n"
+                f"🎬 Synthesizing cinematic motion clip for: *\"{disp_title}\"*\n\n"
+            )
+            yield f"data: {json.dumps({'content': intro, 'done': False})}\n\n"
+
+            loop = asyncio.get_running_loop()
+            video_res = await loop.run_in_executor(
+                None,
+                generate_local_video,
+                video_prompt,
+                model
+            )
+
+            video_html = get_real_video_card_html(video_res)
+            dur_val = float(video_res.get('duration_sec', 120.0))
+            hours = int(dur_val // 3600)
+            mins = int((dur_val % 3600) // 60)
+            secs = int(dur_val % 60)
+            if hours > 0:
+                dur_fmt = f"{hours:02d}:{mins:02d}:{secs:02d} ({int(dur_val)}s / {hours} Hour Feature-Length)"
+            else:
+                dur_fmt = f"{mins:02d}:{secs:02d} ({int(dur_val)}s)"
             specs = (
                 f"\n\n{video_html}\n\n"
                 f"**Cinematic Video Specifications:**\n"
-                f"- **Resolution**: 1080p Cinema (1920 &times; 1080 Aspect Ratio 16:9)\n"
-                f"- **Framerate**: 60 FPS Fluid Motion\n"
-                f"- **Motion Vectors**: DiT Video Diffusion Pipeline &bull; Camera Dolly &amp; Pan\n"
-                f"- **Controls**: You can click **Play / Pause** to toggle live playback or **Download Video** to save the render."
+                f"- **Format**: Direct H.264 MP4 Cinema Stream (`{video_res['mp4_filename']}`)\n"
+                f"- **Duration**: **{dur_fmt}** ({video_res['num_frames']} Frames at {video_res['fps']} FPS)\n"
+                f"- **Resolution**: {video_res['width']} × {video_res['height']} Standard Cinema Viewport\n"
+                f"- **Subject Kinematics**: Authentic multi-frame character animation, rhythmic choreography & multi-scene cuts\n"
+                f"- **Local Storage**: Saved locally to `data/generated/{video_res['mp4_filename']}` (100% self-owned, 0% cloud).\n"
+                f"- **Controls**: Use the interactive player scrubber, play/pause controls, or click **Expand** for full cinema lightbox."
             )
-            full_text = intro + specs
+            full_text = specs
             start_time = time.time()
             chunk_size = 48
             token_count = 0
@@ -151,20 +204,72 @@ class ModelRunner:
             yield f"data: {json.dumps(final_chunk)}\n\n"
             return
 
-        # 2. High-Resolution Visual / Image Generation Pipeline
+        # 2. Local Photorealistic Image Generation Pipeline (Real Local PNG File, Zero SVG)
         if is_image_request(last_prompt, model, is_visual_model=is_visual_model):
-            svg_content = synthesize_visual_content(last_prompt, model)
-            highlights = get_visual_highlights(last_prompt)
-            intro = f"**ModelDock High-Resolution Visual Render** (Vector &bull; 2.5x Retina)\n\nRendering visual artwork for: *\"{last_prompt}\"*\n\n"
+            from core.visual_synthesis import resolve_visual_prompt
+            res_meta = resolve_visual_prompt(messages)
+            disp_title = res_meta["display_name"]
+            diff_prompt = res_meta["diffusion_prompt"]
+            diff_steps = res_meta["steps"]
+            diff_guidance = res_meta["guidance_scale"]
+            is_boost = res_meta.get("is_quality_boost", False)
+
+            # Stream immediate status token with clean Unicode bullet and true visual title
+            quality_badge = " (Ultra-Quality Mode)" if is_boost else ""
+            intro = f"**ModelDock Local Neural AI Render** (100% Local GPU • Direct PNG)\n\n⚡ Synthesizing visual frame for: *\"{disp_title}\"*{quality_badge}\n\n"
+            yield f"data: {json.dumps({'content': intro, 'done': False})}\n\n"
+
+            # Execute generation in async thread pool so event loop remains responsive
+            from core.local_visual_engine import generate_local_image
+            loop = asyncio.get_running_loop()
+            img_res = await loop.run_in_executor(
+                None,
+                generate_local_image,
+                diff_prompt,
+                model,
+                None,
+                diff_steps,
+                diff_guidance
+            )
+
+            image_url = img_res["url"]
+            filename = img_res["filename"]
+            highlights = get_visual_highlights(disp_title)
             card = (
-                f"```xml\n"
-                f"{svg_content}\n"
-                f"```\n\n"
+                f"<!-- AI_REAL_IMAGE_START -->\n"
+                f"<div class=\"ai-raster-image-card\">\n"
+                f"  <div class=\"ai-image-header\">\n"
+                f"    <div class=\"ai-image-badge-label\">\n"
+                f"      <svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\" ry=\"2\"></rect><circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"></circle><polyline points=\"21 15 16 10 5 21\"></polyline></svg>\n"
+                f"      <span>Local Neural AI Render</span>\n"
+                f"      <span class=\"ai-image-res-pill\">Direct PNG • 100% Local GPU</span>\n"
+                f"    </div>\n"
+                f"    <div class=\"ai-image-actions\">\n"
+                f"      <button class=\"btn-image-action\" onclick=\"enhanceImageTo8K(this, '{image_url}')\" title=\"Enhance to 4K / 8K Ultra-HD with AI Super-Resolution\" style=\"color: #c084fc;\">\n"
+                f"        <svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"></polygon></svg>\n"
+                f"        <span>8K Enhance</span>\n"
+                f"      </button>\n"
+                f"      <button class=\"btn-image-action\" onclick=\"copyRasterImageFromCard(this)\" title=\"Copy PNG to clipboard\">\n"
+                f"        <svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"></rect><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"></path></svg>\n"
+                f"        <span>Copy Image</span>\n"
+                f"      </button>\n"
+                f"      <a class=\"btn-image-action btn-image-download\" href=\"{image_url}\" download=\"{filename}\" title=\"Download high-resolution PNG\">\n"
+                f"        <svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"></path><polyline points=\"7 10 12 15 17 10\"></polyline><line x1=\"12\" y1=\"15\" x2=\"12\" y2=\"3\"></line></svg>\n"
+                f"        <span>Download Image</span>\n"
+                f"      </a>\n"
+                f"    </div>\n"
+                f"  </div>\n"
+                f"  <div class=\"ai-raster-viewport\">\n"
+                f"    <img src=\"{image_url}\" alt=\"{disp_title}\" class=\"generated-real-photo\" onclick=\"openImageLightbox(this.src, this.alt)\" title=\"Click to zoom &amp; inspect (Scroll wheel to zoom, Drag to pan)\" style=\"max-width:440px; max-height:380px; width:100%; border-radius:12px; display:block; cursor:zoom-in; object-fit:cover; box-shadow:0 10px 30px rgba(0,0,0,0.5);\" />\n"
+                f"  </div>\n"
+                f"</div>\n"
+                f"<!-- AI_REAL_IMAGE_END -->\n\n"
                 f"**Artistic Highlights:**\n"
                 f"{highlights}\n"
-                f"- **Controls**: You can click **Copy Image** or **Download Image (PNG)** at the top right of the visual card above."
+                f"- **Local Storage**: Saved locally to `data/generated/{filename}` (100% self-owned, 0% cloud).\n"
+                f"- **Controls**: You can click **Download Image** to save the PNG or **Copy Image**."
             )
-            full_text = intro + card
+            full_text = card
             start_time = time.time()
             chunk_size = 48
             token_count = 0
@@ -190,6 +295,13 @@ class ModelRunner:
             return
 
         # 3. Native Language Model Execution (Text / Coding / Reasoning)
+        # Ensure any residual GPU VRAM from previous image diffusion runs is freed for the LLM
+        try:
+            from core.neural_diffusion_engine import release_gpu_memory
+            release_gpu_memory()
+        except Exception:
+            pass
+
         if not self.engine.is_server_running() or self.engine.active_model_name != model:
             load_res = self.engine.start_model(model, context_length=num_ctx)
             if not load_res.get("success"):

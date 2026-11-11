@@ -222,3 +222,14 @@ __marimo__/
 
 models
 downloads
+ModelDockdoc
+software
+dist
+
+# ModelDock generated media and local runtime data
+data/generated/
+data/models/
+data/cache/
+*.mp4
+*.webp
+*.gguf

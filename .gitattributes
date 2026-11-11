@@ -1,0 +1,12 @@
+# Auto detect text files and normalize line endings
+* text=auto
+
+# Keep shell scripts strictly LF for Linux, macOS, and iOS
+*.sh text eol=lf
+*.desktop text eol=lf
+*.plist text eol=lf
+
+# Windows scripts and installers use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf

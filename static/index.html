@@ -236,6 +236,9 @@
                 <button class="btn-icon" id="btn-chat-model-info" title="Inspect Model Architecture & Hardware Specs" onclick="openActiveModelDetails()" type="button">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                 </button>
+                <button class="btn-icon" id="btn-chat-containers-insight" title="View Container Runtime Insights &amp; Hardware Controls (Pause, Stop, VRAM/RAM)" onclick="switchTab('system')" type="button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                </button>
               </div>
             </div>
 
@@ -349,7 +352,38 @@
           </div>
 
           <!-- Chat Input Bar (ChatGPT Styled Floating Capsule) -->
-          <div class="chat-input-area">
+          <div class="chat-input-area" style="position: relative;">
+            <!-- Floating Prompt Enhancer Popover (Interactive 4-Style Selector) -->
+            <div id="popover-prompt-enhancer" class="prompt-enhancer-popover hidden">
+              <div class="popover-header">
+                <div class="popover-title-row">
+                  <span class="popover-sparkle">✨</span>
+                  <span class="popover-heading">Choose Enhanced Prompt Style</span>
+                  <span class="badge badge-purple" style="font-size: 0.7rem;">4 Styles</span>
+                </div>
+                <button class="popover-close-btn" onclick="closePromptEnhancerPopover()" title="Close">&times;</button>
+              </div>
+
+              <!-- Typo Banner inside Popover -->
+              <div id="popover-typo-notice" class="popover-typo-notice hidden"></div>
+
+              <!-- List of Variations Cards -->
+              <div id="popover-variations-list" class="popover-variations-list">
+                <div class="popover-loading">
+                  <svg class="spin-anim" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
+                  <span>Synthesizing prompt styles...</span>
+                </div>
+              </div>
+
+              <div class="popover-footer">
+                <button class="btn-popover-advanced" onclick="openFullStudioFromPopover()">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                  <span>Advanced Studio Controls</span>
+                </button>
+                <span class="popover-tip">Click any style to select or render</span>
+              </div>
+            </div>
+
             <div id="chat-drop-container" class="input-container chatgpt-input-capsule">
               <!-- Hidden file input for documents, images, screenshots, videos -->
               <input type="file" id="chat-file-input" class="hidden" multiple accept="image/*,video/*,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.sql" />
@@ -366,6 +400,11 @@
               </div>
 
               <div class="input-controls">
+                <!-- Single Compact Magic Enhance Button (Full spacious text writing window!) -->
+                <button id="btn-magic-enhance" class="btn-magic-sparkle" type="button" title="✨ Enhance Prompt (Choose from 4 Styles)" onclick="togglePromptEnhancerPopover()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2l2.4 5.6L20 10l-4.5 4 1.4 6-4.9-3.2L7.1 20l1.4-6L4 10l5.6-2.4L12 2z"></path></svg>
+                </button>
+
                 <!-- Think Mode Pill -->
                 <button id="btn-chat-think" class="btn-think-pill" type="button" title="Toggle parameters / reasoning controls">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M9 12a3 3 0 0 0 6 0"></path><path d="M12 3v3"></path></svg>
@@ -399,10 +438,20 @@
           <div class="hub-search-bar">
             <div class="search-input-wrap">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              <input type="text" id="hf-search-query" placeholder="Type to search any open-source model (DeepSeek, Llama, Qwen, Mistral)..." autocomplete="off" />
+              <input type="text" id="hf-search-query" placeholder="Type to search open-source models (Llama, DeepSeek, Qwen, Mistral)..." autocomplete="off" />
               <!-- Instant Type-Ahead Dropdown Menu (Hugging Face, Ollama, Local) -->
               <div id="omni-search-dropdown" class="omni-search-dropdown hidden"></div>
             </div>
+
+            <!-- Platform Filter Selector (Hugging Face vs Ollama vs Both) -->
+            <div class="select-wrapper-sm">
+              <select id="hub-platform-filter" class="select-dropdown-sm" title="Filter by Platform">
+                <option value="all" selected>🌐 All Platforms (Both)</option>
+                <option value="huggingface">🤗 Hugging Face Hub</option>
+                <option value="ollama">🦙 Ollama Library</option>
+              </select>
+            </div>
+
             <div class="select-wrapper-sm">
               <select id="hf-sort-select" class="select-dropdown-sm">
                 <option value="downloads">Most Downloaded</option>
@@ -414,6 +463,20 @@
             <button id="btn-hf-search" class="btn-primary hub-search-btn">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
               <span>Search Models</span>
+            </button>
+          </div>
+
+          <!-- Quick Platform Source Toggle Chips -->
+          <div class="hub-platform-chips-bar">
+            <span class="platform-chips-label">Platform Source:</span>
+            <button type="button" class="platform-chip active" data-platform="all" onclick="setPlatformFilter('all')">
+              <span>🌐 All Platforms (Both)</span>
+            </button>
+            <button type="button" class="platform-chip" data-platform="huggingface" onclick="setPlatformFilter('huggingface')">
+              <span>🤗 Hugging Face Hub</span>
+            </button>
+            <button type="button" class="platform-chip" data-platform="ollama" onclick="setPlatformFilter('ollama')">
+              <span>🦙 Ollama Library</span>
             </button>
           </div>
         </div>
@@ -534,6 +597,32 @@
           <button id="btn-refresh-telemetry" class="btn-secondary">Refresh Now</button>
         </div>
 
+        <!-- Docker-Style Active Model Container Runtimes -->
+        <div class="containers-section" style="margin-bottom: 2rem;">
+          <div class="containers-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem; color: #f1f5f9;">
+                <span>🐳</span>
+                <span>Active Model Container Runtimes (Docker-Style Control)</span>
+              </h3>
+              <p style="margin: 0.25rem 0 0; font-size: 0.82rem; color: var(--text-secondary);">
+                Live container insight: Monitor active processes, GPU VRAM allocation, and CPU load. Pause execution or stop containers to immediately cool down hardware.
+              </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button class="btn-secondary btn-sm" onclick="purgeModelVram()" title="Free cached PyTorch/CUDA VRAM buffers without terminating the model">
+                ⚡ Purge VRAM
+              </button>
+              <button class="btn-danger btn-sm" onclick="stopActiveModelContainer()" title="Emergency unload: Terminate running model process and free 100% of GPU/CPU memory">
+                ⏹️ Stop All Containers
+              </button>
+            </div>
+          </div>
+          <div id="containers-list-container" class="containers-grid">
+            <!-- Dynamically populated container cards or idle state -->
+          </div>
+        </div>
+
         <div class="telemetry-grid">
           <!-- Software Footprint Card -->
           <div class="stat-card highlight-card">
@@ -641,6 +730,16 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
               Profile & Identity
             </button>
+            <button class="settings-nav-btn" data-category="appearance">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path>
+              </svg>
+              Theme & Colors 🎨
+            </button>
             <button class="settings-nav-btn" data-category="engine">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
               Resources & Engine
@@ -700,6 +799,257 @@
                 <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1.25rem;">
                   <button id="btn-save-profile" class="btn-primary" type="button">Save Profile</button>
                   <span id="profile-save-status" class="hidden" style="color: var(--accent-emerald); font-size: 0.88rem; font-weight: 500;">✓ Profile saved successfully!</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE: Theme, Colors & Appearance Studio (1000+ Combinations) -->
+            <div id="settings-pane-appearance" class="settings-pane">
+              <div class="settings-pane-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                  <h3>🎨 Theme & Color Customization Studio</h3>
+                  <p>Full customization for chat prompts, AI responses, background wallpapers, header, sidebar, and 1000+ color combinations.</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <button type="button" class="btn-secondary btn-sm" onclick="generateRandomTheme()" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(99, 102, 241, 0.2)); border-color: rgba(168, 85, 247, 0.5); color: #c084fc; font-weight: 600;" title="Generate a brand new unique harmonious color combination">
+                    <span>🎲 Randomize (1000+ Combos)</span>
+                  </button>
+                  <button type="button" class="btn-secondary btn-sm" onclick="resetThemeToDefault()" title="Reset back to factory Obsidian Pro theme">
+                    <span>↺ Reset</span>
+                  </button>
+                  <button type="button" class="btn-primary btn-sm" onclick="saveCurrentTheme()" title="Save custom theme permanently">
+                    <span>💾 Save Theme</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Live Interactive Mini Preview Sandbox -->
+              <div class="settings-section-card" style="margin-bottom: 1.5rem;">
+                <div class="settings-label-wrap" style="margin-bottom: 0.75rem;">
+                  <label>Live Real-Time Preview Sandbox:</label>
+                  <span class="badge badge-cyan">Updates in 0ms</span>
+                </div>
+                <div id="preview-theme-canvas" class="theme-preview-sandbox">
+                  <!-- Mock Header -->
+                  <div id="preview-theme-header" class="theme-preview-header">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <span style="font-size: 1rem;">🌐</span>
+                      <strong style="font-size: 0.85rem;">ModelDock Studio</strong>
+                    </div>
+                    <span style="font-size: 0.75rem; opacity: 0.75;">DeepSeek R1 (7B)</span>
+                  </div>
+
+                  <!-- Mock Chat Body -->
+                  <div class="theme-preview-chat-body">
+                    <!-- User Prompt Bubble -->
+                    <div class="theme-preview-msg-row user-row">
+                      <div id="preview-theme-user" class="theme-preview-bubble user-bubble">
+                        <span>Can you create an 8K photorealistic render of a vintage sports car?</span>
+                      </div>
+                    </div>
+
+                    <!-- AI Response Bubble -->
+                    <div class="theme-preview-msg-row ai-row">
+                      <div id="preview-theme-ai" class="theme-preview-bubble ai-bubble">
+                        <span>✨ Synthesizing 8K frame with raytraced reflections, studio lighting, and metallic coat on local NVIDIA RTX 4060 GPU!</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 1-Click Designer Themes (1000+ Combos Foundation) -->
+              <div class="settings-section-card" style="margin-bottom: 1.5rem;">
+                <div class="settings-label-wrap" style="margin-bottom: 0.75rem;">
+                  <label>1-Click Designer Themes:</label>
+                  <span class="badge">12 Curated Presets</span>
+                </div>
+                <div id="theme-presets-grid" class="theme-presets-grid"></div>
+              </div>
+
+              <!-- Granular Color Customization Grid -->
+              <div class="theme-custom-grid">
+                <!-- Group 1: Chat User Prompt Bubble -->
+                <div class="settings-section-card">
+                  <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: #fff; font-size: 0.95rem;">
+                    <span>💬</span> Chat User Prompt Bubble
+                  </h4>
+                  <div class="theme-color-field">
+                    <label>Bubble Background:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-user-bg" value="#1e2436" />
+                      <input type="text" id="theme-user-bg-text" class="color-hex-input" value="#1e2436" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Prompt Text Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-user-text" value="#f8fafc" />
+                      <input type="text" id="theme-user-text-text" class="color-hex-input" value="#f8fafc" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Bubble Border Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-user-border" value="#6366f1" />
+                      <input type="text" id="theme-user-border-text" class="color-hex-input" value="#6366f1" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Group 2: Chat AI Response Bubble -->
+                <div class="settings-section-card">
+                  <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: #fff; font-size: 0.95rem;">
+                    <span>🤖</span> Chat AI Response Bubble
+                  </h4>
+                  <div class="theme-color-field">
+                    <label>Response Background:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-ai-bg" value="#181d2c" />
+                      <input type="text" id="theme-ai-bg-text" class="color-hex-input" value="#181d2c" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Response Text Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-ai-text" value="#f1f5f9" />
+                      <input type="text" id="theme-ai-text-text" class="color-hex-input" value="#f1f5f9" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Response Border Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-ai-border" value="#4f46e5" />
+                      <input type="text" id="theme-ai-border-text" class="color-hex-input" value="#4f46e5" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Group 3: Chat Canvas & Background Wallpaper -->
+                <div class="settings-section-card">
+                  <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: #fff; font-size: 0.95rem;">
+                    <span>🖼️</span> Chat Canvas & Background Image
+                  </h4>
+                  <div class="theme-color-field">
+                    <label>Canvas Base Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-chat-bg" value="#0a0c12" />
+                      <input type="text" id="theme-chat-bg-text" class="color-hex-input" value="#0a0c12" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field" style="flex-direction: column; align-items: flex-start; gap: 0.35rem;">
+                    <label>Wallpaper Background Preset:</label>
+                    <select id="theme-wallpaper-preset" class="select-dropdown" style="width: 100%;">
+                      <option value="none">None (Solid / Deep Canvas)</option>
+                      <option value="cosmic">Cosmic Deep Space</option>
+                      <option value="grid">Cyberpunk Grid</option>
+                      <option value="tokyo">Tokyo Neon Glow</option>
+                      <option value="starry">Starry Night</option>
+                      <option value="emerald">Emerald Flow</option>
+                      <option value="sunset">Sunset Horizon</option>
+                      <option value="hexagons">Obsidian Hexagons</option>
+                      <option value="custom">Custom Image (URL or Upload)</option>
+                    </select>
+                  </div>
+                  <div id="theme-custom-wallpaper-wrap" style="display: none; margin-top: 0.65rem;">
+                    <div style="margin-bottom: 0.5rem;">
+                      <label style="font-size: 0.78rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Custom Image URL:</label>
+                      <input type="text" id="theme-wallpaper-url" class="form-input" placeholder="https://example.com/wallpaper.jpg" />
+                    </div>
+                    <div>
+                      <label style="font-size: 0.78rem; color: var(--text-secondary); display: block; margin-bottom: 0.25rem;">Or Upload Local Wallpaper:</label>
+                      <input type="file" id="theme-wallpaper-file" accept="image/*" class="form-input" style="padding: 0.3rem;" />
+                    </div>
+                  </div>
+                  <div class="theme-slider-field" style="margin-top: 0.75rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                      <span>Wallpaper Opacity:</span>
+                      <span id="theme-wallpaper-opacity-val" class="metric-highlight">100%</span>
+                    </div>
+                    <input type="range" id="theme-wallpaper-opacity" min="10" max="100" value="100" class="range-slider" />
+                  </div>
+                  <div class="theme-slider-field" style="margin-top: 0.75rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                      <span>Wallpaper Blur Effect:</span>
+                      <span id="theme-wallpaper-blur-val" class="metric-highlight">0px</span>
+                    </div>
+                    <input type="range" id="theme-wallpaper-blur" min="0" max="25" value="0" class="range-slider" />
+                  </div>
+                </div>
+
+                <!-- Group 4: Header, Sidebars & Brand Accent -->
+                <div class="settings-section-card">
+                  <h4 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: #fff; font-size: 0.95rem;">
+                    <span>🧭</span> Header, Sidebar & Brand Accents
+                  </h4>
+                  <div class="theme-color-field">
+                    <label>Header Topbar Background:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-header-bg" value="#10131d" />
+                      <input type="text" id="theme-header-bg-text" class="color-hex-input" value="#10131d" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Header Text Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-header-text" value="#f8fafc" />
+                      <input type="text" id="theme-header-text-text" class="color-hex-input" value="#f8fafc" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Header Border Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-header-border" value="#262c3e" />
+                      <input type="text" id="theme-header-border-text" class="color-hex-input" value="#262c3e" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field" style="margin-top: 0.65rem;">
+                    <label>Sidebar Panels Background:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-sidebar-bg" value="#0d101a" />
+                      <input type="text" id="theme-sidebar-bg-text" class="color-hex-input" value="#0d101a" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Sidebar Text Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-sidebar-text" value="#f8fafc" />
+                      <input type="text" id="theme-sidebar-text-text" class="color-hex-input" value="#f8fafc" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Sidebar Border Color:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-sidebar-border" value="#1e2436" />
+                      <input type="text" id="theme-sidebar-border-text" class="color-hex-input" value="#1e2436" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field" style="margin-top: 0.65rem;">
+                    <label>Brand Primary Accent:</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-accent-color" value="#6366f1" />
+                      <input type="text" id="theme-accent-color-text" class="color-hex-input" value="#6366f1" />
+                    </div>
+                  </div>
+                  <div class="theme-color-field">
+                    <label>Secondary Accent (Violet):</label>
+                    <div class="color-picker-wrap">
+                      <input type="color" id="theme-accent-violet" value="#8b5cf6" />
+                      <input type="text" id="theme-accent-violet-text" class="color-hex-input" value="#8b5cf6" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Backup & Sharing -->
+              <div class="settings-section-card" style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                  <h4 style="margin: 0 0 0.25rem 0; font-size: 0.95rem; color: #fff;">Theme Backup & Sharing</h4>
+                  <p style="margin: 0; font-size: 0.8rem; color: var(--text-muted);">Export your custom theme configuration as JSON or import themes from other users.</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                  <button type="button" class="btn-secondary btn-sm" onclick="exportThemeJSON()">📋 Export Theme JSON</button>
+                  <button type="button" class="btn-secondary btn-sm" onclick="importThemeJSON()">📥 Import Theme JSON</button>
                 </div>
               </div>
             </div>
@@ -883,23 +1233,29 @@
                   <div class="settings-label-wrap">
                     <label for="setting-models-dir">Installed Models Directory:</label>
                   </div>
-                  <div class="settings-inline-btn">
-                    <input type="text" id="setting-models-dir" class="form-input" style="flex: 1;" readonly />
-                    <button id="btn-open-models-dir" class="btn-secondary btn-sm">
-                      📁 Open in Explorer
+                  <div class="settings-inline-btn" style="gap: 0.5rem; flex-wrap: wrap;">
+                    <input type="text" id="setting-models-dir" class="form-input" style="flex: 1; min-width: 260px;" placeholder="e.g. A:\AI_Project_work\models" />
+                    <button id="btn-browse-models-dir" class="btn-primary btn-sm" title="Select a folder on your computer">
+                      📂 Browse Folder...
+                    </button>
+                    <button id="btn-open-models-dir" class="btn-secondary btn-sm" title="Open this folder in Windows Explorer">
+                      ↗ Open
                     </button>
                   </div>
-                  <div class="param-hint">All GGUF models stored in this directory appear automatically in your Model Library.</div>
+                  <div class="param-hint">Select or type any folder on your computer. All GGUF models stored there appear automatically in your Model Library.</div>
                 </div>
 
                 <div class="settings-row">
                   <div class="settings-label-wrap">
                     <label for="setting-downloads-dir">Downloads Cache Directory:</label>
                   </div>
-                  <div class="settings-inline-btn">
-                    <input type="text" id="setting-downloads-dir" class="form-input" style="flex: 1;" readonly />
-                    <button id="btn-open-downloads-dir" class="btn-secondary btn-sm">
-                      📁 Open in Explorer
+                  <div class="settings-inline-btn" style="gap: 0.5rem; flex-wrap: wrap;">
+                    <input type="text" id="setting-downloads-dir" class="form-input" style="flex: 1; min-width: 260px;" placeholder="e.g. A:\AI_Project_work\downloads" />
+                    <button id="btn-browse-downloads-dir" class="btn-primary btn-sm" title="Select a folder on your computer">
+                      📂 Browse Folder...
+                    </button>
+                    <button id="btn-open-downloads-dir" class="btn-secondary btn-sm" title="Open this folder in Windows Explorer">
+                      ↗ Open
                     </button>
                   </div>
                   <div class="param-hint">Active and resumable download chunks are streamed into this folder.</div>
@@ -1021,7 +1377,7 @@
           <div class="modal-subtitle-row">
             <span id="inspect-modal-repo-id" class="code-badge">author/repo</span>
             <a id="inspect-modal-source-link" href="#" target="_blank" rel="noopener noreferrer" class="link-external" title="Open Repository on Hugging Face">
-              <span>View on Hugging Face</span>
+              <span id="inspect-modal-source-text">View on Hugging Face</span>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
             </a>
           </div>
@@ -1273,12 +1629,12 @@
             <div class="spec-tile">
               <span class="spec-tile-label">Context Window</span>
               <span class="spec-tile-val" id="md-ctx">--</span>
-              <span class="spec-tile-sub">Maximum token capacity</span>
+              <span class="spec-tile-sub" id="md-ctx-sub">Maximum token capacity</span>
             </div>
             <div class="spec-tile">
               <span class="spec-tile-label">Layer Depth</span>
               <span class="spec-tile-val" id="md-layers">--</span>
-              <span class="spec-tile-sub">Transformer blocks</span>
+              <span class="spec-tile-sub" id="md-layers-sub">Transformer blocks</span>
             </div>
             <div class="spec-tile">
               <span class="spec-tile-label">Embedding Dim</span>
@@ -1345,6 +1701,209 @@
     </div>
   </div>
 
+  <!-- ModelDock Prompt Generator Studio Modal -->
+  <div id="modal-prompt-studio" class="modal-backdrop hidden" onclick="if(event.target === this) closePromptStudioModal()">
+    <div class="modal-card modal-card-lg modal-card-prompt-studio">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <div class="modal-header-icon-box" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(59, 130, 246, 0.2)); border: 1px solid rgba(168, 85, 247, 0.4);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+          </div>
+          <div>
+            <h3 id="prompt-studio-title" style="margin: 0; font-size: 1.2rem; font-weight: 700; color: #fff;">Prompt Generator Studio</h3>
+            <p style="margin: 0.2rem 0 0 0; font-size: 0.8rem; color: var(--text-muted);">Transform simple ideas into master prompts with 8K lighting, optics, art styles & typo fixing</p>
+          </div>
+        </div>
+        <button class="btn-close" onclick="closePromptStudioModal()" title="Close Studio">✕</button>
+      </div>
+
+      <div class="modal-body modal-body-scrollable" style="padding: 1.25rem 1.5rem;">
+        <!-- Studio Mode Switcher -->
+        <div class="prompt-studio-mode-bar">
+          <button class="prompt-mode-btn active" id="mode-btn-image" onclick="switchPromptStudioMode('image')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+            <span>Visual Diffusion & 8K Images</span>
+          </button>
+          <button class="prompt-mode-btn" id="mode-btn-llm" onclick="switchPromptStudioMode('llm')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <span>LLM Reasoning & System Prompts</span>
+          </button>
+        </div>
+
+        <!-- IMAGE PROMPT MODE SECTION -->
+        <div id="prompt-section-image" class="prompt-studio-section active">
+          <!-- Concept Input -->
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="prompt-input-concept" style="font-size: 0.84rem; font-weight: 600; color: #e4e4e7; display: flex; justify-content: space-between;">
+              <span>Base Idea / Subject / Scene</span>
+              <span style="font-size: 0.74rem; color: #a1a1aa; font-weight: 400;">(e.g., "helmet on table", "vintage red sports car", "warrior in neon city")</span>
+            </label>
+            <div style="position: relative;">
+              <input type="text" id="prompt-input-concept" class="form-control" placeholder="Enter simple idea or keywords..." style="font-size: 0.92rem; padding: 0.65rem 0.85rem;" />
+            </div>
+          </div>
+
+          <!-- Modifiers Grid (Style, Lighting, Camera Lens) -->
+          <div class="prompt-modifiers-grid">
+            <div class="modifier-box">
+              <label><span class="mod-icon">🎨</span> Art Style</label>
+              <select id="prompt-select-style" class="form-control select-dropdown-sm">
+                <option value="photorealistic" selected>📸 Photorealistic 8K Photography</option>
+                <option value="cinematic">🎬 Cinematic Movie Still</option>
+                <option value="cyberpunk">🌃 Cyberpunk Neon Sci-Fi</option>
+                <option value="anime">🌸 Makoto Shinkai Anime Style</option>
+                <option value="studio">🛍️ Commercial Studio Product</option>
+                <option value="concept_art">🎨 Epic Concept Art (Unreal 5)</option>
+              </select>
+            </div>
+
+            <div class="modifier-box">
+              <label><span class="mod-icon">💡</span> Lighting & Mood</label>
+              <select id="prompt-select-lighting" class="form-control select-dropdown-sm">
+                <option value="golden_hour" selected>🌅 Warm Golden-Hour Sunset</option>
+                <option value="studio_softbox">💡 Studio Softbox Diffusion</option>
+                <option value="cyberpunk_neon">🔮 Cyberpunk Neon Backlight</option>
+                <option value="dramatic_chiaroscuro">🎭 Dramatic Chiaroscuro</option>
+                <option value="volumetric_fog">🌫️ Volumetric Atmospheric Rays</option>
+              </select>
+            </div>
+
+            <div class="modifier-box">
+              <label><span class="mod-icon">📷</span> Camera Optics</label>
+              <select id="prompt-select-camera" class="form-control select-dropdown-sm">
+                <option value="85mm_portrait" selected>🔍 85mm f/1.4 Bokeh (Portrait/Object)</option>
+                <option value="macro_detail">🔬 Macro Detail Close-Up</option>
+                <option value="wide_angle_24mm">📐 Wide-Angle 24mm Architecture</option>
+                <option value="isometric_3d">🎲 Isometric 3D Perspective</option>
+                <option value="drone_aerial">🦅 Drone Bird's-Eye Panoramic</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Action Button -->
+          <div style="margin: 1.15rem 0 1.25rem 0; display: flex; gap: 0.75rem; align-items: center;">
+            <button id="btn-generate-prompts" class="btn-primary" onclick="generatePromptsFromStudio()" style="flex: 1; padding: 0.65rem 1.25rem; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; background: linear-gradient(135deg, #8b5cf6, #3b82f6);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+              <span>Generate 3 Expert Prompt Variations</span>
+            </button>
+            <button class="btn-secondary" onclick="randomizeStudioIdea()" title="Inspire with random topic">
+              🎲 Random Idea
+            </button>
+          </div>
+
+          <!-- Live Typo Correction Notice Banner -->
+          <div id="studio-typo-banner" class="typo-alert-banner hidden">
+            <span class="typo-icon">💡</span>
+            <div id="studio-typo-text" class="typo-content"></div>
+          </div>
+
+          <!-- Generated Variations Container -->
+          <div id="prompt-variations-container" class="prompt-variations-container hidden">
+            <h4 style="font-size: 0.88rem; font-weight: 700; color: #e4e4e7; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+              <span>✨ Generated Variations</span>
+              <span class="badge badge-purple" style="font-size: 0.7rem;">Click to Use or Render</span>
+            </h4>
+            <div id="prompt-variations-list" class="prompt-variations-list"></div>
+          </div>
+        </div>
+
+        <!-- LLM REASONING / SYSTEM PROMPT SECTION -->
+        <div id="prompt-section-llm" class="prompt-studio-section hidden">
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label style="font-size: 0.84rem; font-weight: 600; color: #e4e4e7;">What do you want the LLM to do?</label>
+            <textarea id="llm-task-input" class="form-control" rows="3" placeholder="e.g. Write a high-performance Python async worker pool, or analyze this quarterly financial report..."></textarea>
+          </div>
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label style="font-size: 0.84rem; font-weight: 600; color: #e4e4e7;">Persona / Expertise Tier</label>
+            <select id="llm-role-select" class="form-control select-dropdown-sm">
+              <option value="expert" selected>💻 World-Class Principal Software Architect</option>
+              <option value="analyst">📊 Forensic Data Analyst & Technical Researcher</option>
+              <option value="creative">🎨 Visionary Creative Director & Storyteller</option>
+              <option value="concise">⚡ Ultra-Concise Executive Assistant (Zero Fluff)</option>
+            </select>
+          </div>
+          <button class="btn-primary" onclick="generateLLMPromptsFromStudio()" style="padding: 0.65rem 1.25rem; font-weight: 600; background: linear-gradient(135deg, #10b981, #06b6d4);">
+            ✨ Generate LLM System Prompt Scaffolding
+          </button>
+          <div id="llm-result-container" class="prompt-variations-container hidden" style="margin-top: 1rem;">
+            <div id="llm-result-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.76rem; color: #71717a;">ModelDock Studio &bull; 100% Offline AI Prompt Architect</span>
+        <button class="btn-secondary" onclick="closePromptStudioModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- High-Resolution Image Zoom & Pan Lightbox Modal -->
+  <div id="modal-image-lightbox" class="lightbox-backdrop hidden" onclick="handleLightboxBackdropClick(event)">
+    <!-- Floating Top Bar -->
+    <div class="lightbox-topbar">
+      <div class="lightbox-title-area">
+        <span class="lightbox-icon">🔍</span>
+        <span id="lightbox-image-title" class="lightbox-title">Generated Artwork</span>
+        <span id="lightbox-zoom-badge" class="lightbox-zoom-badge">100%</span>
+      </div>
+      <div class="lightbox-actions">
+        <button class="btn-lightbox" onclick="zoomLightboxImage(0.25)" title="Zoom In (+)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+          <span>Zoom In</span>
+        </button>
+        <button class="btn-lightbox" onclick="zoomLightboxImage(-0.25)" title="Zoom Out (-)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+          <span>Zoom Out</span>
+        </button>
+        <button class="btn-lightbox" onclick="resetLightboxZoom()" title="Reset to Fit (100%)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="M21 3l-7 7"></path><path d="M3 21l7-7"></path></svg>
+          <span>Fit</span>
+        </button>
+        <button id="btn-lightbox-crisp" class="btn-lightbox" onclick="toggleLightboxCrispMode()" title="Toggle Sharp 1:1 Pixel vs Smooth Photographic Rendering">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"></circle><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path></svg>
+          <span id="lightbox-crisp-text">Sharp Pixels</span>
+        </button>
+        <button id="btn-lightbox-enhance" class="btn-lightbox" onclick="enhanceCurrentLightboxImage(4)" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(59, 130, 246, 0.25)); border-color: rgba(168, 85, 247, 0.5); color: #c084fc; font-weight: 600;" title="Enhance image to 4K / 8K Ultra-HD with AI Super-Resolution">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          <span id="lightbox-enhance-text">✨ 8K Enhance</span>
+        </button>
+        <button id="btn-lightbox-play" class="btn-lightbox" onclick="toggleLightboxPlayPause()" style="display: none; background: rgba(59, 130, 246, 0.25); border-color: rgba(59, 130, 246, 0.5); color: #60a5fa;" title="Play / Pause Video (Spacebar)">
+          <svg id="lightbox-play-icon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span id="lightbox-play-text">Play</span>
+        </button>
+        <button id="btn-lightbox-loop" class="btn-lightbox" onclick="toggleLightboxVideoLoop()" style="display: none;" title="Toggle Video Loop">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+          <span id="lightbox-loop-text">Loop: ON</span>
+        </button>
+        <button id="btn-lightbox-speed" class="btn-lightbox" onclick="cycleLightboxVideoSpeed()" style="display: none;" title="Cycle Playback Speed">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          <span id="lightbox-speed-text">1.0x</span>
+        </button>
+        <button id="btn-lightbox-copy" class="btn-lightbox" onclick="copyLightboxImage()" title="Copy Image to Clipboard">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span>Copy</span>
+        </button>
+        <a id="lightbox-download-link" class="btn-lightbox btn-lightbox-primary" href="#" download="" title="Download Asset">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span id="lightbox-download-text">Download</span>
+        </a>
+        <button class="btn-lightbox-close" onclick="closeImageLightbox()" title="Close Viewer (Esc)">✕</button>
+      </div>
+    </div>
+
+    <!-- Zoomable Viewport -->
+    <div id="lightbox-viewport" class="lightbox-viewport" onwheel="handleLightboxWheel(event)" onmousedown="handleLightboxMouseDown(event)">
+      <img id="lightbox-img" class="lightbox-img" src="" alt="High-Resolution Preview" draggable="false" ondblclick="handleLightboxDblClick(event)" />
+      <video id="lightbox-video" class="lightbox-video" src="" autoplay loop controls playsinline draggable="false" ondblclick="handleLightboxDblClick(event)" style="display: none;"></video>
+    </div>
+
+    <!-- Bottom Helper Hints -->
+    <div class="lightbox-footer-hints">
+      <span>💡 <strong>Scroll wheel</strong> to zoom &bull; <strong>Drag</strong> to pan &bull; <strong>Space / Play button</strong> to Play/Pause &bull; <strong>Double-click</strong> for 2.5x &bull; <strong>Esc</strong> to close</span>
+    </div>
+  </div>
+
   <!-- Scripts (Versioned to Prevent Browser Caching) -->
   <script src="/static/js/app.js?v=3.9.0"></script>
   <script src="/static/js/monitor.js?v=3.9.0"></script>
@@ -1353,5 +1912,7 @@
   <script src="/static/js/models.js?v=3.9.0"></script>
   <script src="/static/js/chat.js?v=3.9.0"></script>
   <script src="/static/js/settings.js?v=3.9.0"></script>
+  <script src="/static/js/theme_studio.js?v=3.9.0"></script>
+  <script src="/static/js/prompt_studio.js?v=3.9.0"></script>
 </body>
 </html>

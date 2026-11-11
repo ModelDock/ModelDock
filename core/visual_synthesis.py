@@ -103,6 +103,123 @@ def is_image_request(prompt: str, model_name: str, is_visual_model: bool = False
     return False
 
 
+def resolve_visual_prompt(messages: list) -> dict:
+    """
+    Intelligently resolve the true visual subject, prompt, and parameters from conversation history.
+    Never ignores the user's prompt! Only falls back to previous conversation if the current prompt
+    is PURELY a meta-command / quality refinement without any subject (e.g. 'can you create image more quality').
+    """
+    last_user_text = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_text = m.get("content", "").strip()
+            break
+
+    # Strip conversational prefixes
+    clean_prompt = re.sub(
+        r"^(can you\s+)?(please\s+)?(create|generate|make|draw|render|produce|give me|show me)\s+(an?\s+)?(image|photo|picture|photograph|portrait|artwork)?\s*(of|for|with|about)?\s*",
+        "",
+        last_user_text,
+        flags=re.IGNORECASE
+    ).strip()
+
+    # Check if what remains is purely quality/refinement filler words (without any actual subject)
+    filler_words = {
+        "more", "higher", "better", "best", "quality", "realistic", "detail", "details",
+        "enhance", "enhanced", "improve", "improved", "make", "it", "this", "again", "redo",
+        "sharper", "sharp", "resolution", "4k", "8k", "hd", "ultra", "photo", "image", "picture", "render"
+    }
+    tokens = set(re.findall(r"\b\w+\b", clean_prompt.lower()))
+    is_pure_refinement = len(tokens) > 0 and tokens.issubset(filler_words)
+    is_quality_boost = any(k in last_user_text.lower() for k in [
+        "more quality", "higher quality", "better quality", "more realistic",
+        "high quality", "ultra quality", "enhance", "8k", "4k", "masterpiece"
+    ])
+
+    subject = ""
+    if not is_pure_refinement and clean_prompt:
+        # User specified a concrete subject (e.g. "camera phone", "a cat", "cup of coffee")
+        subject = clean_prompt
+    else:
+        # Current message has no subject (e.g. "can you create image more quality").
+        # Search backward through chat history for the most recent message with a real subject!
+        for m in reversed(messages[:-1]):
+            if m.get("role") == "user":
+                prev_text = m.get("content", "").strip()
+                prev_clean = re.sub(
+                    r"^(can you\s+)?(please\s+)?(create|generate|make|draw|render|produce|give me|show me)\s+(an?\s+)?(image|photo|picture|photograph|portrait|artwork)?\s*(of|for|with|about)?\s*",
+                    "",
+                    prev_text,
+                    flags=re.IGNORECASE
+                ).strip()
+                prev_tokens = set(re.findall(r"\b\w+\b", prev_clean.lower()))
+                if prev_tokens and not prev_tokens.issubset(filler_words):
+                    subject = prev_clean
+                    break
+
+    if not subject:
+        subject = clean_prompt or "creative visual render"
+
+    # Clean display title
+    display_title = subject.title()
+    if is_quality_boost:
+        display_title += " (Enhanced Ultra-Quality)"
+
+    # Build rich diffusion prompt tailored dynamically to ANY subject
+    subj_lower = subject.lower()
+    human_keywords = ["human", "man", "woman", "person", "portrait", "face", "girl", "boy", "model", "lady", "guy", "actor"]
+    nature_keywords = ["mountain", "landscape", "lake", "forest", "sunset", "sunrise", "river", "ocean", "valley", "sky", "cloud"]
+    celestial_keywords = ["moon", "star", "space", "astronomy", "lunar", "galaxy", "milky way", "cosmos", "planet"]
+    tech_keywords = ["phone", "camera", "mobile", "smartphone", "laptop", "device", "watch", "gadget", "screen", "computer"]
+    car_keywords = ["car", "supercar", "sports car", "vehicle", "automobile", "ferrari", "lamborghini", "motorcycle", "bike"]
+
+    if any(k in subj_lower for k in human_keywords):
+        diffusion_prompt = (
+            f"A breathtaking, photorealistic portrait of {subject}, 85mm portrait lens, natural skin pores, "
+            "catchlight in eyes, cinematic studio lighting, shallow depth of field, 8k resolution, masterwork, sharp focus"
+        )
+    elif any(k in subj_lower for k in celestial_keywords):
+        diffusion_prompt = (
+            f"A magnificent luminous {subject}, celestial starfield, sharp lunar crater details, "
+            "subtle atmospheric nebula haze, 8k resolution, award-winning astronomy photography"
+        )
+    elif any(k in subj_lower for k in tech_keywords):
+        diffusion_prompt = (
+            f"A sleek modern {subject}, commercial studio product photography, elegant industrial design, "
+            "sharp camera lenses, glossy chassis reflections, 8k resolution, crisp studio lighting, hyperrealistic"
+        )
+    elif any(k in subj_lower for k in car_keywords):
+        diffusion_prompt = (
+            f"A sleek aerodynamic {subject} on asphalt, dynamic specular reflections, glossy metallic paint, "
+            "8k resolution, hyperrealistic automotive photography, studio lighting"
+        )
+    elif any(k in subj_lower for k in nature_keywords):
+        diffusion_prompt = (
+            f"A stunning scenic landscape of {subject}, golden hour lighting, clear reflection, "
+            "atmospheric depth, 8k resolution, National Geographic nature photography"
+        )
+    else:
+        diffusion_prompt = (
+            f"A photorealistic, highly detailed photograph of {subject}, crisp focus, "
+            "professional studio lighting, 8k resolution, award-winning photography"
+        )
+
+    if is_quality_boost:
+        diffusion_prompt += ", masterpiece, ultra-high definition, highly detailed, perfect composition, 35mm photograph"
+
+    diffusion_steps = 6 if is_quality_boost else 5
+    guidance = 1.0 if is_quality_boost else 0.8
+
+    return {
+        "display_name": display_title,
+        "diffusion_prompt": diffusion_prompt,
+        "steps": diffusion_steps,
+        "guidance_scale": guidance,
+        "is_quality_boost": is_quality_boost,
+        "subject": subject
+    }
+
+
 def get_sports_car_svg() -> str:
     """High-detail SVG for black luxury sports car on wet neon city street."""
     return '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" style="max-width: 520px; border-radius: 14px; background: #05070d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
@@ -778,6 +895,30 @@ def get_visual_highlights(prompt: str) -> str:
     """Return tailored highlights markdown matching the rendered visual subject."""
     p = prompt.lower()
 
+    tech_keywords = ["phone", "camera", "mobile", "smartphone", "laptop", "device", "watch", "gadget", "screen", "electronics"]
+    if any(k in p for k in tech_keywords):
+        return (
+            "- **Lighting & Reflections**: High-end studio product illumination with clean specular rim highlights.\n"
+            "- **Hardware Details**: Textured chassis, crisp optical camera lenses, tactile edges, and precise engineering.\n"
+            "- **Color Palette**: Minimalist obsidian, anodized metallic finishes, and multi-coated glass elements."
+        )
+
+    celestial_keywords = ["moon", "sky", "star", "space", "astronomy", "lunar", "galaxy", "milky way", "cosmos", "planet"]
+    if any(k in p for k in celestial_keywords):
+        return (
+            "- **Lighting & Atmosphere**: Luminous celestial glow with soft volumetric atmospheric haze.\n"
+            "- **Detail & Depth**: Distinct lunar surface maria, crater rims, and deep cosmic starfield backdrop.\n"
+            "- **Color Palette**: Deep midnight sapphire, iridescent stellar silver, and warm lunar luminescence."
+        )
+
+    car_keywords = ["car", "sports car", "supercar", "vehicle", "automobile", "ferrari", "lamborghini"]
+    if any(k in p for k in car_keywords):
+        return (
+            "- **Lighting & Reflections**: Studio softbox automotive lighting with aerodynamic specular streaks.\n"
+            "- **Vehicle Details**: Sculpted body panels, high-gloss clear coat, performance wheels, and brake calipers.\n"
+            "- **Color Palette**: High-contrast metallic paint, carbon fiber accents, and dark asphalt backdrop."
+        )
+
     human_keywords = [
         "human", "man", "woman", "person", "portrait", "face", "boy", "girl",
         "people", "character", "guy", "lady", "male", "female", "model",
@@ -786,7 +927,7 @@ def get_visual_highlights(prompt: str) -> str:
     ]
     if any(k in p for k in human_keywords):
         return (
-            "- **Composition &amp; Lighting**: 85mm shallow depth-of-field portrait with golden-hour directional sunlight and cinematic bokeh.\n"
+            "- **Composition & Lighting**: 85mm shallow depth-of-field portrait with golden-hour directional sunlight and cinematic bokeh.\n"
             "- **Subject Details**: Realistic facial proportions, warm skin tone gradient, detailed catchlight eyes, textured hair, and tailored attire.\n"
             "- **Color Palette**: Ultra-wide gamut sunset amber, charcoal black, and natural skin tones."
         )
@@ -794,7 +935,7 @@ def get_visual_highlights(prompt: str) -> str:
     cyber_keywords = ["robot", "cyborg", "android", "mech", "scifi", "sci-fi", "cyberpunk", "futuristic", "droid", "synth", "synthetic"]
     if any(k in p for k in cyber_keywords):
         return (
-            "- **Composition &amp; Lighting**: Volumetric cyber glow with neon cyan and laser magenta rim reflections on armored chassis.\n"
+            "- **Composition & Lighting**: Volumetric cyber glow with neon cyan and laser magenta rim reflections on armored chassis.\n"
             "- **Color Palette**: Deep midnight slate, electric cyan, and laser magenta accents.\n"
             "- **Subject Details**: Angular hydraulic actuators, illuminated optic sensor visor, and core reactor."
         )
@@ -802,15 +943,15 @@ def get_visual_highlights(prompt: str) -> str:
     nature_keywords = ["himalayan", "mountain", "alpine", "lake", "peaks", "sunrise", "summit", "mist", "dawn", "landscape", "valley", "everest", "forest", "nature"]
     if any(k in p for k in nature_keywords):
         return (
-            "- **Composition &amp; Lighting**: Luminous sunrise alpenglow across summit ridges with mirrored alpine lake reflection.\n"
+            "- **Composition & Lighting**: Luminous sunrise alpenglow across summit ridges with mirrored alpine lake reflection.\n"
             "- **Color Palette**: Radiant amber dawn, deep indigo granite, and pine evergreen accents.\n"
             "- **Atmosphere**: Valley morning mist layers with crystal water surface ripples."
         )
 
     return (
-        "- **Composition &amp; Lighting**: Studio dynamic lighting with multi-layered specular reflections and ambient falloff.\n"
+        "- **Composition & Lighting**: Studio dynamic lighting with multi-layered specular reflections and ambient falloff.\n"
         "- **Color Palette**: Ultra-wide gamut gradients tailored to your scene.\n"
-        "- **Rendering**: High-detail vector artwork with smooth gradients."
+        "- **Rendering**: High-detail photographic render with crisp focus."
     )
 
 

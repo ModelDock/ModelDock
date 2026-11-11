@@ -19,7 +19,6 @@
   "user_name": "Test Explorer",
   "user_title": "AI Specialist",
   "model_aliases": {
-    "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M": "DeepSeek R1 Reasoner (7B)",
     "qwen2.5-coder-7b-instruct-q4_k_m-00002-of-00002": "Qwen 2.5 Coder (7B)",
     "z-image-turbo-Q4_K_M": "Z-Image Turbo Fast"
   }

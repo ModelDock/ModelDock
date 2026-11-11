@@ -21,6 +21,7 @@ if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     except Exception:
         pass
+import atexit
 import webbrowser
 import threading
 import time
@@ -53,6 +54,8 @@ from core.model_runner import ModelRunner
 from core.media_processor import MediaProcessor
 from core.chat_manager import ChatManager
 
+from contextlib import asynccontextmanager
+
 config_mgr = ConfigManager.get_instance()
 auth_mgr = AuthManager(config_mgr)
 engine_mgr = EngineManager(config_mgr)
@@ -61,10 +64,22 @@ download_mgr = DownloadManager(config_mgr, auth_mgr)
 model_runner = ModelRunner(config_mgr, engine_mgr)
 chat_mgr = ChatManager.get_instance()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # Zero ghost processes: Clean shutdown lifecycle hook
+    try:
+        engine_mgr.stop_server()
+    except Exception:
+        pass
+
+
 app = FastAPI(
     title="ModelDock Studio",
     description="Universal Local AI Model Platform for Hugging Face & Ollama",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for external local apps (VS Code Continue, Cursor, WebUIs)
@@ -88,6 +103,21 @@ async def add_no_cache_headers(request: Request, call_next):
 # Serve static files
 STATIC_DIR = CURRENT_DIR / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Serve locally generated real images
+GENERATED_DIR = CURRENT_DIR / "data" / "generated"
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/media/generated", StaticFiles(directory=str(GENERATED_DIR)), name="generated_media")
+
+# Zero ghost processes: Clean exit handler
+def on_app_exit():
+    """Ensure all background processes, llama-server, and engines terminate cleanly on exit."""
+    try:
+        engine_mgr.stop_server()
+    except Exception:
+        pass
+
+atexit.register(on_app_exit)
 
 
 # Pydantic Request Models
@@ -191,7 +221,48 @@ async def api_update_config(req: ConfigUpdateRequest):
     dumped = dump_fn() if dump_fn else req.__dict__
     updates = {k: v for k, v in dumped.items() if v is not None}
     config_mgr.update_multiple(updates)
-    return {"success": True, "message": "Settings updated successfully."}
+    models = engine_mgr.list_installed_models()
+    return {"success": True, "message": "Settings updated successfully.", "models_count": len(models)}
+
+
+@app.post("/api/settings/select-folder")
+async def api_select_folder(payload: Dict[str, str]):
+    """Open native Windows folder selection dialog and return chosen path."""
+    folder_type = payload.get("folder", "models")
+    current_val = config_mgr.get(f"{folder_type}_dir", "")
+
+    if sys.platform == "win32":
+        import subprocess
+        ps_code = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = "Select {folder_type.capitalize()} Folder for ModelDock"
+$dialog.ShowNewFolderButton = $true
+if ('{current_val}' -and (Test-Path '{current_val}')) {{
+    $dialog.SelectedPath = '{current_val}'
+}}
+$topForm = New-Object System.Windows.Forms.Form
+$topForm.TopMost = $true
+if ($dialog.ShowDialog($topForm) -eq [System.Windows.Forms.DialogResult]::OK) {{
+    Write-Output $dialog.SelectedPath
+}}
+$topForm.Dispose()
+"""
+        try:
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_code],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            selected = res.stdout.strip()
+            if selected and Path(selected).is_dir():
+                return {"success": True, "path": selected}
+            return {"success": False, "cancelled": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    return {"success": False, "error": "Folder selection dialog is supported on Windows."}
 
 
 @app.post("/api/settings/open-folder")
@@ -274,7 +345,45 @@ async def api_engine_load(payload: Dict[str, Any]):
 @app.post("/api/engine/stop")
 async def api_engine_stop():
     engine_mgr.stop_server()
-    return {"success": True, "message": "Engine stopped."}
+    from core.neural_diffusion_engine import release_gpu_memory
+    release_gpu_memory()
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    return {"success": True, "message": "Engine stopped and memory freed."}
+
+
+@app.get("/api/engine/containers")
+async def api_get_engine_containers():
+    """Return Docker-style list of active model container instances and their resource footprint."""
+    return engine_mgr.get_running_containers()
+
+
+@app.post("/api/engine/pause")
+async def api_engine_pause():
+    """Pause/sleep the running model container to suspend compute and cool down CPU/GPU."""
+    return engine_mgr.pause_container()
+
+
+@app.post("/api/engine/resume")
+async def api_engine_resume():
+    """Resume the paused model container."""
+    return engine_mgr.resume_container()
+
+
+@app.post("/api/engine/free-memory")
+async def api_free_memory():
+    """Purge GPU VRAM and CPU RAM allocated by diffusion or inference models."""
+    from core.neural_diffusion_engine import release_gpu_memory
+    release_gpu_memory()
+    import gc
+    gc.collect()
+    return {"success": True, "message": "GPU VRAM and system memory purged successfully."}
 
 
 @app.get("/api/models")
@@ -373,6 +482,81 @@ async def api_hf_inspect(repo_id: str):
     if not repo_id:
         raise HTTPException(status_code=400, detail="repo_id parameter required")
     return await hf_client.inspect_repo_files(repo_id)
+
+
+# --- Ollama Library Explore Endpoints ---
+@app.get("/api/ollama/featured")
+async def api_ollama_featured():
+    """Return top curated Ollama library models."""
+    return hf_client.get_featured_ollama()
+
+
+@app.get("/api/ollama/search")
+async def api_ollama_search(q: str = "", limit: int = 24):
+    """Search Ollama models across catalog and public registry."""
+    return await hf_client.search_ollama(query=q, limit=limit)
+
+
+# --- AI Super-Resolution 4K / 8K Image Enhancer ---
+@app.post("/api/media/enhance-8k")
+async def api_media_enhance_8k(payload: Dict[str, Any]):
+    """Upscale and enhance an image to crystal-clear 4K/8K resolution with bilateral denoising."""
+    from core.neural_diffusion_engine import enhance_and_upscale_image
+    image_path = payload.get("image_path") or payload.get("filename")
+    scale = int(payload.get("scale", 4))
+    if not image_path:
+        raise HTTPException(status_code=400, detail="image_path or filename is required")
+    res = enhance_and_upscale_image(image_path, scale_factor=scale)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Enhancement failed"))
+    return res
+
+
+# --- Prompt Generation & Studio Endpoints ---
+@app.post("/api/prompt/enhance")
+async def api_quick_enhance_prompt(payload: Dict[str, Any]):
+    """Quickly enhance a user prompt with typo fixing and photographic 8K descriptors."""
+    from core.prompt_generator import quick_enhance_image_prompt, correct_prompt_typos
+    raw_prompt = payload.get("prompt", "")
+    if not raw_prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    enhanced = quick_enhance_image_prompt(raw_prompt)
+    _, corrections = correct_prompt_typos(raw_prompt)
+    return {
+        "success": True,
+        "original_prompt": raw_prompt,
+        "enhanced_prompt": enhanced,
+        "corrections": corrections,
+    }
+
+
+@app.post("/api/prompt/generate")
+async def api_generate_prompt_variations(payload: Dict[str, Any]):
+    """Generate structured multi-variation prompts with custom styles, cameras, and lighting."""
+    from core.prompt_generator import generate_prompt_variations
+    concept = payload.get("concept", "")
+    if not concept:
+        raise HTTPException(status_code=400, detail="concept is required")
+    res = generate_prompt_variations(
+        concept=concept,
+        style=payload.get("style", "photorealistic"),
+        lighting=payload.get("lighting", "golden_hour"),
+        camera=payload.get("camera", "85mm_portrait"),
+        mood=payload.get("mood", "cinematic"),
+        custom_modifiers=payload.get("custom_modifiers"),
+    )
+    return res
+
+
+@app.post("/api/prompt/llm")
+async def api_generate_llm_prompt(payload: Dict[str, Any]):
+    """Generate an optimized system prompt and task breakdown for LLM reasoning."""
+    from core.prompt_generator import generate_llm_system_prompt
+    task_desc = payload.get("task_description", "")
+    if not task_desc:
+        raise HTTPException(status_code=400, detail="task_description is required")
+    res = generate_llm_system_prompt(task_desc, role=payload.get("role", "expert"))
+    return res
 
 
 # --- Background Downloader (Hugging Face & Ollama) with Pause / Resume ---
@@ -697,11 +881,16 @@ def main():
     if config_mgr.get("auto_open_browser", True):
         threading.Thread(target=launch_browser, args=(port,), daemon=True).start()
 
+    print("   🟢 Server is live and actively listening for requests.")
+    print("   💡 Live request and engine activity will appear below in real-time.")
+    print("   🛑 Press Ctrl+C in this CMD window anytime to stop the server.\n")
+
     uvicorn.run(
         app,
         host=host,
         port=port,
-        log_level="warning",  # Keep console silent and clean
+        log_level="info",
+        access_log=True,
     )
 
 

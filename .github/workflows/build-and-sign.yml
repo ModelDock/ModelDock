@@ -1,0 +1,65 @@
+name: Build, Sign & Release ModelDock
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pywebview
+
+      - name: Compile Standalone Binaries (PyInstaller)
+        run: |
+          pyinstaller --clean software/windows/modeldock.spec
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+
+      - name: Compile Windows Installer (Inno Setup)
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" software/windows/installer.iss
+
+      # Optional: Sign executable with SignPath (Free for Open Source) or PFX Certificate
+      - name: Sign Installer with Certificate (If Configured)
+        if: env.CERTIFICATE_BASE64 != ''
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+        shell: powershell
+        run: |
+          $pfxBytes = [System.Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+          $pfxPath = "$env:TEMP\cert.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+          $installer = "software/windows/ModelDockUserSetup-x64-v1.0.0.exe"
+          & signtool sign /f $pfxPath /p $env:CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 $installer
+          Remove-Item -Force $pfxPath
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            software/windows/ModelDockUserSetup-x64-v1.0.0.exe
+          generate_release_notes: true

@@ -84,8 +84,14 @@ function initSettings() {
   const btnSave = document.getElementById("btn-save-settings");
   if (btnSave) btnSave.addEventListener("click", saveSettings);
 
+  const btnBrowseModels = document.getElementById("btn-browse-models-dir");
+  if (btnBrowseModels) btnBrowseModels.addEventListener("click", () => selectFolderDialog("models"));
+
   const btnOpenModels = document.getElementById("btn-open-models-dir");
   if (btnOpenModels) btnOpenModels.addEventListener("click", () => openFolder("models"));
+
+  const btnBrowseDownloads = document.getElementById("btn-browse-downloads-dir");
+  if (btnBrowseDownloads) btnBrowseDownloads.addEventListener("click", () => selectFolderDialog("downloads"));
 
   const btnOpenDownloads = document.getElementById("btn-open-downloads-dir");
   if (btnOpenDownloads) btnOpenDownloads.addEventListener("click", () => openFolder("downloads"));
@@ -148,6 +154,10 @@ function switchSettingsCategory(cat) {
 
   if (cat === "auth" && typeof checkAuthStatus === "function") {
     checkAuthStatus();
+  }
+
+  if (cat === "appearance" && typeof updateLiveThemePreview === "function" && typeof currentActiveTheme !== "undefined") {
+    updateLiveThemePreview(currentActiveTheme);
   }
 }
 
@@ -293,8 +303,15 @@ async function saveSettings() {
 
     const data = await res.json();
     if (res.ok && data.success) {
+      if (typeof loadLocalModels === "function") {
+        try {
+          await loadLocalModels();
+        } catch (e) {
+          console.warn("Model list refresh after save:", e);
+        }
+      }
       if (statusMsg) {
-        statusMsg.innerHTML = '<span style="color: var(--accent-green);">✓ Settings saved successfully!</span>';
+        statusMsg.innerHTML = '<span style="color: var(--accent-green);">✓ Settings saved! Model folder updated and rescanned.</span>';
         setTimeout(() => {
           statusMsg.innerHTML = "";
         }, 3000);
@@ -312,6 +329,41 @@ async function saveSettings() {
     if (btnSave) {
       btnSave.disabled = false;
       btnSave.textContent = "Save Changes";
+    }
+  }
+}
+
+async function selectFolderDialog(folderType) {
+  const inputEl = document.getElementById(folderType === "models" ? "setting-models-dir" : "setting-downloads-dir");
+  const btn = document.getElementById(folderType === "models" ? "btn-browse-models-dir" : "btn-browse-downloads-dir");
+  const originalHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳ Selecting...</span>`;
+  }
+
+  try {
+    const res = await fetch("/api/settings/select-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder: folderType }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.path) {
+      if (inputEl) {
+        inputEl.value = data.path;
+        inputEl.style.borderColor = "var(--accent-primary, #6366f1)";
+      }
+      await saveSettings();
+    } else if (!data.cancelled) {
+      alert(`Could not select folder: ${data.error || "Operation was not completed."}`);
+    }
+  } catch (err) {
+    console.error("Folder selection failed:", err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
     }
   }
 }

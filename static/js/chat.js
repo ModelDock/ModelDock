@@ -194,6 +194,19 @@ function initChat() {
         try {
           localStorage.setItem("modeldock_active_model", selectedModel);
         } catch (e) {}
+
+        // Bind model to active chat session for per-chat memory
+        const currSession = getActiveSession();
+        if (currSession) {
+          currSession.model = selectedModel;
+          saveSessionsToStorage();
+        }
+
+        // Update Project Banner if currently inside a project
+        const bannerModel = document.getElementById("project-banner-model");
+        if (bannerModel) {
+          bannerModel.textContent = `🤖 ${selectedModel}`;
+        }
       }
     });
   }
@@ -205,15 +218,46 @@ function initChat() {
     });
   }
 
+  const paramSysPrompt = document.getElementById("param-system-prompt");
+
   if (tempSlider && tempVal) {
     tempSlider.addEventListener("input", () => {
       tempVal.textContent = tempSlider.value;
+      try {
+        localStorage.setItem("modeldock_param_temp", tempSlider.value);
+        const curr = getActiveSession();
+        if (curr) {
+          curr.temperature = parseFloat(tempSlider.value);
+          saveSessionsToStorage();
+        }
+      } catch (e) {}
     });
   }
 
   if (ctxSelect && ctxVal) {
     ctxSelect.addEventListener("change", () => {
       ctxVal.textContent = ctxSelect.value;
+      try {
+        localStorage.setItem("modeldock_param_ctx", ctxSelect.value);
+        const curr = getActiveSession();
+        if (curr) {
+          curr.contextWindow = parseInt(ctxSelect.value, 10);
+          saveSessionsToStorage();
+        }
+      } catch (e) {}
+    });
+  }
+
+  if (paramSysPrompt) {
+    paramSysPrompt.addEventListener("input", () => {
+      try {
+        localStorage.setItem("modeldock_param_sys_prompt", paramSysPrompt.value);
+        const curr = getActiveSession();
+        if (curr) {
+          curr.systemPrompt = paramSysPrompt.value;
+          saveSessionsToStorage();
+        }
+      } catch (e) {}
     });
   }
 
@@ -627,15 +671,20 @@ function toggleProjectExpanded(projectId) {
 
 // --- Multi-Session State Management ---
 let syncServerTimer = null;
-function syncChatsToServer() {
+function syncChatsToServer(immediate = false) {
   if (syncServerTimer) clearTimeout(syncServerTimer);
-  syncServerTimer = setTimeout(() => {
+  const doSync = () => {
     fetch("/api/chats/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessions: chatSessions, projects: projects }),
     }).catch((e) => console.warn("Failed to sync chats to server:", e));
-  }, 250);
+  };
+  if (immediate) {
+    doSync();
+  } else {
+    syncServerTimer = setTimeout(doSync, 250);
+  }
 }
 
 async function initChatSessions() {
@@ -743,21 +792,25 @@ async function initChatSessions() {
 
       // Sync sessions from server
       if (serverData.sessions && Array.isArray(serverData.sessions) && serverData.sessions.length > 0) {
-        chatSessions = serverData.sessions;
-        const currentActive = chatSessions.find((s) => s.id === activeSessionId);
-        if (!currentActive) {
-          const withMsgs = chatSessions.find((s) => s.messages && s.messages.length > 0);
-          activeSessionId = withMsgs ? withMsgs.id : chatSessions[0].id;
+        // Do not overwrite if currently in-flight generation is active locally
+        const hasPendingLocal = chatSessions.some((s) => s.messages && s.messages.some((m) => m.status === "generating"));
+        if (!hasPendingLocal) {
+          chatSessions = serverData.sessions;
+          const currentActive = chatSessions.find((s) => s.id === activeSessionId);
+          if (!currentActive) {
+            const withMsgs = chatSessions.find((s) => s.messages && s.messages.length > 0);
+            activeSessionId = withMsgs ? withMsgs.id : chatSessions[0].id;
+          }
+          const activeNow = getActiveSession();
+          if (activeNow && activeNow.projectId) {
+            expandedProjectIds.add(activeNow.projectId);
+          }
+          shouldReRender = true;
+          saveSessionsToStorage();
         }
-        const activeNow = getActiveSession();
-        if (activeNow && activeNow.projectId) {
-          expandedProjectIds.add(activeNow.projectId);
-        }
-        shouldReRender = true;
-        saveSessionsToStorage();
       } else if (chatSessions.length > 0 && chatSessions.some((s) => s.messages && s.messages.length > 0)) {
         // Server was empty but local has chats -> immediately push to server disk!
-        syncChatsToServer();
+        syncChatsToServer(true);
       }
 
       if (shouldReRender) {
@@ -795,22 +848,26 @@ function createNewSession(projectId = null) {
   // Clean up any other unused empty "New chat" sessions
   chatSessions = chatSessions.filter((s) => s.id === activeSessionId || (s.messages && s.messages.length > 0));
 
-  // If a project is specified, switch model to project preferred model if set
+  // Determine model for new chat session
+  const chatSelect = document.getElementById("chat-model-select");
+  let chosenModel = "";
   if (targetProjectId) {
     const proj = getProject(targetProjectId);
     if (proj && proj.model) {
-      const chatSelect = document.getElementById("chat-model-select");
-      if (chatSelect && proj.model) {
-        chatSelect.value = proj.model;
-        try { localStorage.setItem("modeldock_active_model", proj.model); } catch (e) {}
-      }
+      chosenModel = proj.model;
+      if (chatSelect) chatSelect.value = proj.model;
+      try { localStorage.setItem("modeldock_active_model", proj.model); } catch (e) {}
     }
+  }
+  if (!chosenModel) {
+    chosenModel = (chatSelect && chatSelect.value) || localStorage.getItem("modeldock_active_model") || "";
   }
 
   const newSession = {
     id: "session_" + Date.now(),
     title: "New chat",
     projectId: targetProjectId,
+    model: chosenModel,
     timestamp: Date.now(),
     messages: [],
     pinned: false,
@@ -818,6 +875,9 @@ function createNewSession(projectId = null) {
 
   chatSessions.unshift(newSession);
   activeSessionId = newSession.id;
+  try {
+    localStorage.setItem("modeldock_active_session_id", activeSessionId);
+  } catch (e) {}
 
   // Auto-expand the project in sidebar
   if (targetProjectId) {
@@ -848,6 +908,7 @@ function selectSession(sessionId) {
     } catch (e) {}
   }
   
+  saveSessionsToStorage();
   renderSidebarSessions();
   loadActiveSession();
   focusUserInput();
@@ -1095,7 +1156,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-function saveSessionsToStorage() {
+function saveSessionsToStorage(immediate = false) {
   try {
     // Sanitize sessions to strip out multi-megabyte base64 images from localStorage
     const sanitized = chatSessions.map((s) => ({
@@ -1129,7 +1190,7 @@ function saveSessionsToStorage() {
   }
 
   // Always sync to persistent disk on backend
-  syncChatsToServer();
+  syncChatsToServer(immediate);
 }
 
 function loadActiveSession() {
@@ -1139,6 +1200,53 @@ function loadActiveSession() {
   chatHistory = current.messages || [];
   chatAttachments = [];
   renderAttachmentTray();
+
+  // 1. Restore and synchronize the active model specifically for this session
+  const chatSelect = document.getElementById("chat-model-select");
+  if (chatSelect && window.AppState && AppState.localModels && AppState.localModels.length > 0) {
+    let targetModel = current.model;
+    if (!targetModel && current.projectId && typeof getProject === "function") {
+      const proj = getProject(current.projectId);
+      if (proj && proj.model) targetModel = proj.model;
+    }
+    if (!targetModel) {
+      targetModel = localStorage.getItem("modeldock_active_model");
+    }
+
+    if (targetModel && AppState.localModels.some((m) => m.name === targetModel)) {
+      chatSelect.value = targetModel;
+      current.model = targetModel;
+    } else if (!current.model && chatSelect.value) {
+      current.model = chatSelect.value;
+    }
+    try {
+      localStorage.setItem("modeldock_active_model", chatSelect.value);
+    } catch (e) {}
+  }
+
+  // 2. Restore Parameters for this session or fallback to global stored preferences
+  const tempSlider = document.getElementById("param-temp");
+  const tempVal = document.getElementById("temp-val");
+  const ctxSelect = document.getElementById("param-ctx");
+  const ctxVal = document.getElementById("ctx-val");
+  const paramSysPrompt = document.getElementById("param-system-prompt");
+
+  const sessionTemp = current.temperature !== undefined ? current.temperature : localStorage.getItem("modeldock_param_temp");
+  if (tempSlider && sessionTemp !== null && sessionTemp !== undefined) {
+    tempSlider.value = sessionTemp;
+    if (tempVal) tempVal.textContent = sessionTemp;
+  }
+
+  const sessionCtx = current.contextWindow || localStorage.getItem("modeldock_param_ctx");
+  if (ctxSelect && sessionCtx) {
+    ctxSelect.value = sessionCtx;
+    if (ctxVal) ctxVal.textContent = sessionCtx;
+  }
+
+  const sessionSysPrompt = current.systemPrompt !== undefined ? current.systemPrompt : localStorage.getItem("modeldock_param_sys_prompt");
+  if (paramSysPrompt && sessionSysPrompt !== null && sessionSysPrompt !== undefined) {
+    paramSysPrompt.value = sessionSysPrompt;
+  }
 
   // Handle Project Banner in Chat Canvas
   const projectBanner = document.getElementById("project-context-banner");
@@ -1175,6 +1283,42 @@ function loadActiveSession() {
   const container = document.getElementById("chat-messages");
   if (!container) return;
 
+  // Detect if generation was in progress or interrupted by refresh
+  let pendingGenerationPrompt = null;
+  let pendingGenerationModel = null;
+  let pendingAssistIndex = -1;
+
+  if (chatHistory.length > 0) {
+    const lastMsg = chatHistory[chatHistory.length - 1];
+    if (lastMsg.role === "user") {
+      // User sent prompt and refreshed before assistant responded:
+      pendingGenerationPrompt = lastMsg.augmented_prompt || lastMsg.content;
+      pendingGenerationModel = current.model || (typeof getActiveChatModel === "function" ? getActiveChatModel() : "Local AI");
+      const assistMsg = {
+        role: "assistant",
+        content: "",
+        status: "generating",
+        model: pendingGenerationModel,
+        timestamp: new Date().toLocaleTimeString(),
+        startedAt: Date.now(),
+      };
+      chatHistory.push(assistMsg);
+      pendingAssistIndex = chatHistory.length - 1;
+      current.messages = chatHistory;
+      saveSessionsToStorage(true);
+    } else if (lastMsg.role === "assistant" && lastMsg.status === "generating") {
+      // Refresh happened while assistant was actively generating!
+      for (let j = chatHistory.length - 2; j >= 0; j--) {
+        if (chatHistory[j].role === "user") {
+          pendingGenerationPrompt = chatHistory[j].augmented_prompt || chatHistory[j].content;
+          break;
+        }
+      }
+      pendingGenerationModel = lastMsg.model || current.model || (typeof getActiveChatModel === "function" ? getActiveChatModel() : "Local AI");
+      pendingAssistIndex = chatHistory.length - 1;
+    }
+  }
+
   if (chatHistory.length === 0) {
     renderWelcomeScreen();
   } else {
@@ -1187,10 +1331,27 @@ function loadActiveSession() {
         msg.attachments || [],
         msg.metrics || null,
         msg.timestamp || null,
-        i
+        i,
+        msg.status || null,
+        msg.model || current.model || null
       );
     }
     container.scrollTop = container.scrollHeight;
+  }
+
+  // If there was an in-progress generation when refreshed, re-activate progress timer and resume stream!
+  if (pendingAssistIndex >= 0 && pendingGenerationPrompt) {
+    const btnSend = document.getElementById("btn-send");
+    const btnStop = document.getElementById("btn-stop");
+    if (btnSend) btnSend.classList.add("hidden");
+    if (btnStop) btnStop.classList.remove("hidden");
+
+    const assistMsg = chatHistory[pendingAssistIndex];
+    startGenerationProgressTimer(pendingAssistIndex, assistMsg.startedAt || Date.now());
+
+    setTimeout(() => {
+      resumePendingChatStream(pendingAssistIndex, pendingGenerationPrompt, pendingGenerationModel);
+    }, 300);
   }
 }
 
@@ -1527,12 +1688,56 @@ function sendQuickPrompt(promptText) {
   sendMessage();
 }
 
+let activeGenerationTimer = null;
+let activeGenerationStartTime = null;
+
+function startGenerationProgressTimer(cardIndex, startTime = Date.now()) {
+  if (activeGenerationTimer) clearInterval(activeGenerationTimer);
+  activeGenerationStartTime = startTime;
+
+  activeGenerationTimer = setInterval(() => {
+    const elapsedSec = ((Date.now() - activeGenerationStartTime) / 1000).toFixed(1);
+    const timerEl = document.querySelector(`#chat-progress-timer-${cardIndex} .timer-value`) || document.querySelector(`.chat-progress-timer .timer-value`);
+    const statusEl = document.getElementById(`chat-progress-status-${cardIndex}`) || document.querySelector(`.chat-progress-status-text`);
+
+    if (timerEl) {
+      timerEl.textContent = `${elapsedSec}s`;
+    }
+    if (statusEl) {
+      const sec = parseFloat(elapsedSec);
+      if (sec < 2.5) {
+        statusEl.innerHTML = `⚡ Loading model context & initializing GPU weights...`;
+      } else if (sec < 6.0) {
+        statusEl.innerHTML = `🧠 Neural inference active • Synthesizing response tokens...`;
+      } else if (sec < 14.0) {
+        statusEl.innerHTML = `🎬 Model generation in progress (${elapsedSec}s) • Deep reasoning & synthesis...`;
+      } else {
+        statusEl.innerHTML = `⏳ Synthesizing comprehensive output (${elapsedSec}s) • Computing tokens...`;
+      }
+    }
+  }, 100);
+}
+
+function stopGenerationProgressTimer() {
+  if (activeGenerationTimer) {
+    clearInterval(activeGenerationTimer);
+    activeGenerationTimer = null;
+  }
+}
+
+function getActiveChatModel() {
+  const modelSelect = document.getElementById("chat-model-select");
+  if (modelSelect && modelSelect.value) return modelSelect.value;
+  const currentSession = getActiveSession();
+  if (currentSession && currentSession.model) return currentSession.model;
+  return localStorage.getItem("modeldock_active_model") || (window.AppState && AppState.localModels && AppState.localModels[0] ? AppState.localModels[0].name : "qwen2-0_5b-instruct-q4_k_m");
+}
+
 async function sendMessage() {
   const userInput = document.getElementById("user-input");
   const messagesContainer = document.getElementById("chat-messages");
   const btnSend = document.getElementById("btn-send");
   const btnStop = document.getElementById("btn-stop");
-  const streamStats = document.getElementById("chat-stream-stats");
   const modelSelect = document.getElementById("chat-model-select");
 
   const prompt = userInput ? userInput.value.trim() : "";
@@ -1550,24 +1755,27 @@ async function sendMessage() {
     return;
   }
 
+  // Ensure current session persistently remembers this model
+  const currentSession = getActiveSession();
+  if (currentSession) {
+    currentSession.model = currentModel;
+    saveSessionsToStorage();
+  }
+
   // Clear welcome screen on first message
-  const welcomeEl = messagesContainer.querySelector(".chat-welcome");
-  if (welcomeEl) {
-    messagesContainer.innerHTML = "";
+  if (messagesContainer) {
+    const welcomeEl = messagesContainer.querySelector(".chat-welcome");
+    if (welcomeEl) {
+      messagesContainer.innerHTML = "";
+    }
   }
 
   // Auto-Title Session if it is currently "New chat"
-  const currentSession = getActiveSession();
   if (currentSession && (currentSession.title === "New chat" || !currentSession.title)) {
     const rawTitle = prompt || (currentAttachments[0] ? currentAttachments[0].filename : "Chat");
     currentSession.title = rawTitle.slice(0, 32).trim();
     renderSidebarSessions();
   }
-
-  // Append User Message to UI
-  const userTime = new Date().toLocaleTimeString();
-  const userMsgIndex = chatHistory.length;
-  appendMessageUI("user", prompt, currentAttachments, null, userTime, userMsgIndex);
 
   // Build Context for LLM with attached document/media metadata
   let augmentedPrompt = prompt;
@@ -1585,7 +1793,11 @@ async function sendMessage() {
     augmentedPrompt = prompt + mediaPromptPrefix;
   }
 
-  // Update in-memory chatHistory & Active Session
+  // Append User Message to UI & in-memory chatHistory
+  const userTime = new Date().toLocaleTimeString();
+  const userMsgIndex = chatHistory.length;
+  appendMessageUI("user", prompt, currentAttachments, null, userTime, userMsgIndex);
+
   const userMsgObj = {
     role: "user",
     content: prompt,
@@ -1594,11 +1806,25 @@ async function sendMessage() {
     timestamp: userTime,
   };
   chatHistory.push(userMsgObj);
+
+  // IMMEDIATELY create & persist the Assistant response entry in chatHistory!
+  const assistTime = new Date().toLocaleTimeString();
+  const assistIndex = chatHistory.length;
+  const assistMsgObj = {
+    role: "assistant",
+    content: "",
+    status: "generating",
+    model: currentModel,
+    timestamp: assistTime,
+    startedAt: Date.now(),
+  };
+  chatHistory.push(assistMsgObj);
+
   if (currentSession) {
     currentSession.messages = chatHistory;
     currentSession.timestamp = Date.now();
   }
-  saveSessionsToStorage();
+  saveSessionsToStorage(true);
 
   // Reset Input and Attachments
   if (userInput) {
@@ -1608,12 +1834,30 @@ async function sendMessage() {
   chatAttachments = [];
   renderAttachmentTray();
 
-  // Create Assistant Message Bubble for Streaming
-  const { bubbleElement, bodyElement } = createAssistantBubbleUI(currentModel);
+  // Create Assistant Message Bubble with Progress Card for Streaming
+  appendMessageUI("assistant", "", [], null, assistTime, assistIndex, "generating", currentModel);
+  startGenerationProgressTimer(assistIndex, assistMsgObj.startedAt);
 
   // Toggle buttons
   if (btnSend) btnSend.classList.add("hidden");
   if (btnStop) btnStop.classList.remove("hidden");
+
+  // Call the shared streaming runner
+  await resumePendingChatStream(assistIndex, augmentedPrompt, currentModel);
+}
+
+async function resumePendingChatStream(assistIndex, prompt, model) {
+  const currentSession = getActiveSession();
+  if (!currentSession) return;
+  const assistMsgObj = chatHistory[assistIndex];
+  if (!assistMsgObj) return;
+
+  const bodyElement = document.getElementById(`msg-body-${assistIndex}`);
+  const bubbleElement = bodyElement ? bodyElement.closest(".message-bubble") : null;
+  const btnSend = document.getElementById("btn-send");
+  const btnStop = document.getElementById("btn-stop");
+  const streamStats = document.getElementById("chat-stream-stats");
+  const messagesContainer = document.getElementById("chat-messages");
 
   // Read Parameters
   const tempSlider = document.getElementById("param-temp");
@@ -1622,17 +1866,9 @@ async function sendMessage() {
 
   const temperature = tempSlider ? parseFloat(tempSlider.value) : 0.7;
   const numCtx = ctxSelect ? parseInt(ctxSelect.value, 10) : 4096;
-  const systemPrompt = systemPromptInput ? systemPromptInput.value.trim() : "";
+  let effectiveSystemPrompt = systemPromptInput ? systemPromptInput.value.trim() : "";
 
-  // Prepare payload
-  const formattedMessages = chatHistory.map((m) => ({
-    role: m.role,
-    content: m.augmented_prompt || m.content,
-  }));
-
-  // If chatting inside a project, automatically apply the project's custom system instructions!
-  let effectiveSystemPrompt = systemPrompt;
-  if (currentSession && currentSession.projectId) {
+  if (currentSession && currentSession.projectId && typeof getProject === "function") {
     const proj = getProject(currentSession.projectId);
     if (proj && proj.systemPrompt && proj.systemPrompt.trim()) {
       effectiveSystemPrompt = effectiveSystemPrompt
@@ -1641,8 +1877,19 @@ async function sendMessage() {
     }
   }
 
+  // Filter messages up to this turn (exclude in-progress empty assistant turn)
+  const formattedMessages = chatHistory
+    .slice(0, assistIndex)
+    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content && m.content.trim()))
+    .map((m) => ({
+      role: m.role,
+      content: m.augmented_prompt || m.content,
+    }));
+
+  const activeModel = model || currentSession.model || (typeof getActiveChatModel === "function" ? getActiveChatModel() : "Local AI");
+
   const payload = {
-    model: currentModel,
+    model: activeModel,
     messages: formattedMessages,
     temperature: temperature,
     num_ctx: numCtx,
@@ -1650,14 +1897,17 @@ async function sendMessage() {
   };
 
   abortController = new AbortController();
-  let fullResponse = "";
+  let fullResponse = assistMsgObj.content || "";
   let tokenCount = 0;
-  const startTime = Date.now();
+  const startTime = assistMsgObj.startedAt || Date.now();
   let lastMetrics = null;
   let isTimedOut = false;
   let lastTokenTime = Date.now();
-  const TIMEOUT_INITIAL_MS = 60000; // 60s max before first token chunk
-  const TIMEOUT_IDLE_MS = 35000;    // 35s max stall between token chunks during stream
+  let lastSaveTime = Date.now();
+  const TIMEOUT_INITIAL_MS = 120000;
+  const TIMEOUT_IDLE_MS = 60000;
+
+  startGenerationProgressTimer(assistIndex, startTime);
 
   const timeoutChecker = setInterval(() => {
     const now = Date.now();
@@ -1667,15 +1917,11 @@ async function sendMessage() {
     if (tokenCount === 0 && totalElapsed > TIMEOUT_INITIAL_MS) {
       isTimedOut = true;
       clearInterval(timeoutChecker);
-      if (abortController) {
-        abortController.abort(new Error("TIMED_OUT"));
-      }
+      if (abortController) abortController.abort(new Error("TIMED_OUT"));
     } else if (tokenCount > 0 && idleElapsed > TIMEOUT_IDLE_MS) {
       isTimedOut = true;
       clearInterval(timeoutChecker);
-      if (abortController) {
-        abortController.abort(new Error("TIMED_OUT"));
-      }
+      if (abortController) abortController.abort(new Error("TIMED_OUT"));
     }
   }, 1000);
 
@@ -1702,7 +1948,7 @@ async function sendMessage() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n\n");
-      buffer = lines.pop(); // Keep incomplete chunk
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (line.startsWith("data: ")) {
@@ -1710,156 +1956,179 @@ async function sendMessage() {
             const data = JSON.parse(line.substring(6).trim());
 
             if (data.error) {
-              bodyElement.innerHTML = `
-                <div class="chat-alert-card chat-error-box">
-                  <div class="chat-alert-header">
-                    <div class="chat-alert-badge error-badge">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                      <span>Engine Error</span>
+              stopGenerationProgressTimer();
+              const progressCard = document.getElementById(`chat-progress-card-${assistIndex}`);
+              if (progressCard) progressCard.remove();
+
+              if (bodyElement) {
+                bodyElement.innerHTML = `
+                  <div class="chat-alert-card chat-error-box">
+                    <div class="chat-alert-header">
+                      <div class="chat-alert-badge error-badge">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        <span>Engine Error</span>
+                      </div>
+                      <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
                     </div>
-                    <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
+                    <div class="chat-alert-message">${renderMarkdown(data.error)}</div>
+                    <div class="chat-alert-actions">
+                      <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
+                        <span>Give Prompt Again</span>
+                      </button>
+                      <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Edit prompt">
+                        <span>Edit Earlier Prompt</span>
+                      </button>
+                    </div>
                   </div>
-                  <div class="chat-alert-message">${renderMarkdown(data.error)}</div>
-                  <div class="chat-alert-actions">
-                    <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend the prompt to the model">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                      <span>Give Prompt Again</span>
-                    </button>
-                    <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt and start from there">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                      <span>Edit Earlier Prompt</span>
-                    </button>
-                  </div>
-                </div>
-              `;
+                `;
+              }
+              assistMsgObj.status = "error";
+              saveSessionsToStorage(true);
             }
 
             if (data.content) {
               lastTokenTime = Date.now();
               fullResponse += data.content;
               tokenCount++;
-              bodyElement.innerHTML = renderMarkdown(fullResponse);
+              assistMsgObj.content = fullResponse;
 
-              // Update live speed
+              const contentArea = document.getElementById(`assist-content-${assistIndex}`);
+              if (contentArea) {
+                contentArea.innerHTML = renderMarkdown(fullResponse);
+              } else if (bodyElement) {
+                bodyElement.innerHTML = renderMarkdown(fullResponse);
+              }
+
               const elapsedSec = (Date.now() - startTime) / 1000;
               const liveTps = (tokenCount / Math.max(0.1, elapsedSec)).toFixed(1);
               if (streamStats) streamStats.textContent = `${tokenCount} tokens (${liveTps} t/s)`;
 
-              messagesContainer.scrollTop = messagesContainer.scrollHeight;
+              if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+              // Throttled persistence (save every 1 sec so refresh never loses text!)
+              const now = Date.now();
+              if (now - lastSaveTime > 1000) {
+                lastSaveTime = now;
+                saveSessionsToStorage();
+              }
             }
 
             if (data.done && data.metrics) {
               lastMetrics = data.metrics;
-              const m = data.metrics;
-              const metricsDiv = document.createElement("div");
-              metricsDiv.className = "generation-metrics";
-              metricsDiv.innerHTML = `
-                <span>Speed: <strong class="metric-highlight">${m.tokens_per_sec} tokens/sec</strong></span>
-                <span>Generated: <strong>${m.tokens_generated} tokens</strong></span>
-                <span>Time: <strong>${m.total_time_sec}s</strong></span>
-                <span>Engine: <strong>${(typeof getModelDisplayName === "function" ? getModelDisplayName(m.model) : m.model)}</strong></span>
-              `;
-              bubbleElement.appendChild(metricsDiv);
             }
-          } catch (e) {
-            // Json parse error on partial SSE
-          }
+          } catch (e) {}
         }
       }
     }
 
     clearInterval(timeoutChecker);
+    stopGenerationProgressTimer();
 
-    // Save Assistant response to active session
-    const assistTime = new Date().toLocaleTimeString();
-    const assistMsgObj = {
-      role: "assistant",
-      content: fullResponse,
-      metrics: lastMetrics,
-      timestamp: assistTime,
-    };
-    chatHistory.push(assistMsgObj);
-    if (currentSession) {
-      currentSession.messages = chatHistory;
-      currentSession.timestamp = Date.now();
+    // Clean up progress card
+    const progressCard = document.getElementById(`chat-progress-card-${assistIndex}`);
+    if (progressCard) progressCard.remove();
+
+    if (bodyElement) {
+      bodyElement.innerHTML = renderMarkdown(fullResponse);
     }
-    saveSessionsToStorage();
+
+    if (lastMetrics && bubbleElement && !bubbleElement.querySelector(".generation-metrics")) {
+      const m = lastMetrics;
+      const metricsDiv = document.createElement("div");
+      metricsDiv.className = "generation-metrics";
+      metricsDiv.innerHTML = `
+        <span>Speed: <strong class="metric-highlight">${m.tokens_per_sec || "--"} tokens/sec</strong></span>
+        <span>Generated: <strong>${m.tokens_generated || "--"} tokens</strong></span>
+        <span>Time: <strong>${m.total_time_sec || "--"}s</strong></span>
+        <span>Engine: <strong>${(typeof getModelDisplayName === "function" ? getModelDisplayName(m.model || "--") : (m.model || "--"))}</strong></span>
+      `;
+      bubbleElement.appendChild(metricsDiv);
+    }
+
+    assistMsgObj.status = "completed";
+    assistMsgObj.content = fullResponse;
+    assistMsgObj.metrics = lastMetrics;
+    saveSessionsToStorage(true);
     renderSidebarSessions();
   } catch (err) {
     clearInterval(timeoutChecker);
+    stopGenerationProgressTimer();
     const wasAbortedByUser = err.name === "AbortError" && !isTimedOut && err.message !== "TIMED_OUT";
     const wasTimeout = isTimedOut || err.message === "TIMED_OUT" || (err.message && err.message.toLowerCase().includes("timeout"));
 
-    if (wasTimeout) {
-      bodyElement.innerHTML = `
-        <div class="chat-alert-card chat-timeout-box">
-          <div class="chat-alert-header">
-            <div class="chat-alert-badge timeout-badge">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              <span>Process Stopped (Exceeded Time Limit)</span>
+    const progressCard = document.getElementById(`chat-progress-card-${assistIndex}`);
+    if (progressCard) progressCard.remove();
+
+    assistMsgObj.status = wasAbortedByUser ? "stopped" : "error";
+    assistMsgObj.content = fullResponse;
+    saveSessionsToStorage(true);
+
+    if (bodyElement) {
+      if (wasTimeout) {
+        bodyElement.innerHTML = `
+          <div class="chat-alert-card chat-timeout-box">
+            <div class="chat-alert-header">
+              <div class="chat-alert-badge timeout-badge">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span>Process Stopped (Exceeded Time Limit)</span>
+              </div>
+              <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
             </div>
-            <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
-          </div>
-          <div class="chat-alert-message">
-            The model generation was taking longer than expected and was safely stopped to prevent hanging. You can give the prompt again or edit your prompt to refine it.
-          </div>
-          <div class="chat-alert-actions">
-            <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              <span>Give Prompt Again</span>
-            </button>
-            <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt and start from there">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              <span>Edit Earlier Prompt</span>
-            </button>
-          </div>
-        </div>
-      `;
-    } else if (wasAbortedByUser) {
-      bodyElement.innerHTML += `
-        <div class="chat-alert-card chat-stopped-box">
-          <div class="chat-alert-header">
-            <div class="chat-alert-badge stopped-badge">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
-              <span>Generation Stopped by User</span>
+            <div class="chat-alert-message">
+              The model generation was taking longer than expected and was safely stopped. You can give the prompt again or edit your prompt.
             </div>
-            <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
-          </div>
-          <div class="chat-alert-actions">
-            <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              <span>Give Prompt Again</span>
-            </button>
-            <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt and start from there">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              <span>Edit Earlier Prompt</span>
-            </button>
-          </div>
-        </div>
-      `;
-    } else {
-      bodyElement.innerHTML = `
-        <div class="chat-alert-card chat-error-box">
-          <div class="chat-alert-header">
-            <div class="chat-alert-badge error-badge">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-              <span>Connection / Generation Error</span>
+            <div class="chat-alert-actions">
+              <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
+                <span>Give Prompt Again</span>
+              </button>
+              <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt">
+                <span>Edit Earlier Prompt</span>
+              </button>
             </div>
-            <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
           </div>
-          <div class="chat-alert-message">${escapeHtml(err.message)}</div>
-          <div class="chat-alert-actions">
-            <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-              <span>Give Prompt Again</span>
-            </button>
-            <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt and start from there">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              <span>Edit Earlier Prompt</span>
-            </button>
+        `;
+      } else if (wasAbortedByUser) {
+        bodyElement.innerHTML += `
+          <div class="chat-alert-card chat-stopped-box">
+            <div class="chat-alert-header">
+              <div class="chat-alert-badge stopped-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+                <span>Generation Stopped by User</span>
+              </div>
+              <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="chat-alert-actions">
+              <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
+                <span>Give Prompt Again</span>
+              </button>
+              <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt">
+                <span>Edit Earlier Prompt</span>
+              </button>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        bodyElement.innerHTML = `
+          <div class="chat-alert-card chat-error-box">
+            <div class="chat-alert-header">
+              <div class="chat-alert-badge error-badge">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <span>Connection Error</span>
+              </div>
+              <span class="chat-alert-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="chat-alert-message">${escapeHtml(err.message)}</div>
+            <div class="chat-alert-actions">
+              <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
+                <span>Give Prompt Again</span>
+              </button>
+              <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Modify your prompt">
+                <span>Edit Earlier Prompt</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }
     }
   } finally {
     clearInterval(timeoutChecker);
@@ -1867,11 +2136,12 @@ async function sendMessage() {
     if (btnSend) btnSend.classList.remove("hidden");
     if (btnStop) btnStop.classList.add("hidden");
     if (streamStats) streamStats.textContent = "";
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 }
 
 function stopGeneration() {
+  stopGenerationProgressTimer();
   if (abortController) {
     abortController.abort();
   }
@@ -1879,8 +2149,11 @@ function stopGeneration() {
 
 window.sendMessage = sendMessage;
 window.stopGeneration = stopGeneration;
+window.resumePendingChatStream = resumePendingChatStream;
+window.startGenerationProgressTimer = startGenerationProgressTimer;
+window.stopGenerationProgressTimer = stopGenerationProgressTimer;
 
-function appendMessageUI(role, content, attachments = [], metrics = null, timestamp = null, msgIndex = null) {
+function appendMessageUI(role, content, attachments = [], metrics = null, timestamp = null, msgIndex = null, status = null, model = null) {
   const container = document.getElementById("chat-messages");
   if (!container) return;
 
@@ -1896,7 +2169,8 @@ function appendMessageUI(role, content, attachments = [], metrics = null, timest
       avatarText = "You";
     }
   }
-  const authorName = isUser ? (customName || "You") : ((metrics && metrics.model && typeof getModelDisplayName === "function") ? getModelDisplayName(metrics.model) : "ModelDock Assistant");
+  const effectiveModel = model || (metrics && metrics.model) || (window.AppState && AppState.activeModel) || "ModelDock Assistant";
+  const authorName = isUser ? (customName || "You") : ((typeof getModelDisplayName === "function") ? getModelDisplayName(effectiveModel) : effectiveModel);
   const timeStr = timestamp || new Date().toLocaleTimeString();
   const effectiveIndex = (msgIndex !== null && msgIndex !== undefined) ? msgIndex : (isUser ? chatHistory.length : chatHistory.length);
 
@@ -1947,6 +2221,58 @@ function appendMessageUI(role, content, attachments = [], metrics = null, timest
       </div>`
     : `<span>${timeStr}</span>`;
 
+  let bodyHtml = "";
+  if (isUser) {
+    bodyHtml = renderMarkdown(content);
+  } else if (status === "generating") {
+    const dispModel = typeof getModelDisplayName === "function" ? getModelDisplayName(effectiveModel) : effectiveModel;
+    const partialHtml = content ? `<div class="assistant-content-area" id="assist-content-${effectiveIndex}">${renderMarkdown(content)}</div>` : `<div class="assistant-content-area" id="assist-content-${effectiveIndex}"></div>`;
+    const progressHtml = `
+      <div class="chat-progress-card" id="chat-progress-card-${effectiveIndex}">
+        <div class="chat-progress-header">
+          <div class="chat-progress-info">
+            <span class="chat-progress-spinner"></span>
+            <span>Generating with <strong>${escapeHtml(dispModel)}</strong></span>
+          </div>
+          <div class="chat-progress-timer" id="chat-progress-timer-${effectiveIndex}">⏱️ <span class="timer-value">0.0s</span></div>
+        </div>
+        <div class="chat-progress-bar-track">
+          <div class="chat-progress-bar-fill"></div>
+        </div>
+        <div class="chat-progress-status-row">
+          <span class="chat-progress-status-text" id="chat-progress-status-${effectiveIndex}">
+            ⚡ Processing prompt & synthesizing response tokens...
+          </span>
+          <button class="chat-progress-stop-btn" onclick="stopGeneration()" type="button" title="Stop response generation">
+            ⏹️ Stop
+          </button>
+        </div>
+      </div>
+    `;
+    bodyHtml = `${partialHtml}${progressHtml}`;
+  } else if (status === "stopped") {
+    bodyHtml = `${content ? renderMarkdown(content) : ""}
+      <div class="chat-alert-card chat-stopped-box">
+        <div class="chat-alert-header">
+          <div class="chat-alert-badge stopped-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+            <span>Generation Stopped by User</span>
+          </div>
+          <span class="chat-alert-time">${timeStr}</span>
+        </div>
+        <div class="chat-alert-actions">
+          <button class="btn-chat-action btn-action-retry" onclick="retryLastUserPrompt()" type="button" title="Resend prompt">
+            <span>Give Prompt Again</span>
+          </button>
+          <button class="btn-chat-action btn-action-edit" onclick="editLastUserPrompt()" type="button" title="Edit prompt">
+            <span>Edit Earlier Prompt</span>
+          </button>
+        </div>
+      </div>`;
+  } else {
+    bodyHtml = renderMarkdown(content) || '<span style="color: var(--text-muted); font-style: italic;">No response recorded</span>';
+  }
+
   const row = document.createElement("div");
   row.className = `message-row ${isUser ? "row-user" : "row-assistant"}`;
   row.setAttribute("data-msg-index", effectiveIndex);
@@ -1958,13 +2284,19 @@ function appendMessageUI(role, content, attachments = [], metrics = null, timest
         ${userMetaRight}
       </div>
       ${attachmentsHtml}
-      <div class="message-body" id="msg-body-${effectiveIndex}" data-raw-content="${encodeURIComponent(content)}">${renderMarkdown(content) || (isUser ? "" : '<span style="color: var(--text-muted); font-style: italic;">No response recorded</span>')}</div>
+      <div class="message-body" id="msg-body-${effectiveIndex}" data-raw-content="${encodeURIComponent(content || '')}">${bodyHtml}</div>
       ${metricsHtml}
     </div>
   `;
 
   container.appendChild(row);
   container.scrollTop = container.scrollHeight;
+
+  return {
+    row,
+    bubbleElement: row.querySelector(".message-bubble"),
+    bodyElement: row.querySelector(".message-body"),
+  };
 }
 
 function escapeHtml(str) {
@@ -2285,29 +2617,8 @@ function renderWelcomeScreen() {
 }
 
 function createAssistantBubbleUI(model) {
-  const container = document.getElementById("chat-messages");
-  const row = document.createElement("div");
-  row.className = "message-row row-assistant";
-
-  row.innerHTML = `
-    <div class="message-avatar avatar-assistant">AI</div>
-    <div class="message-bubble bubble-assistant">
-      <div class="message-meta">
-        <span>${(typeof getModelDisplayName === "function" ? getModelDisplayName(model) : model) || "ModelDock Assistant"}</span>
-        <span>${new Date().toLocaleTimeString()}</span>
-      </div>
-      <div class="message-body"><span class="typing-indicator-dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>
-    </div>
-  `;
-
-  container.appendChild(row);
-  container.scrollTop = container.scrollHeight;
-
-  const bubbleElement = row.querySelector(".message-bubble");
-  const bodyElement = row.querySelector(".message-body");
-  const metaElement = row.querySelector(".message-meta");
-
-  return { bubbleElement, bodyElement, metaElement };
+  const assistIndex = chatHistory.length;
+  return appendMessageUI("assistant", "", [], null, new Date().toLocaleTimeString(), assistIndex, "generating", model);
 }
 
 /**
@@ -2474,6 +2785,41 @@ async function copyImageFromCard(btn) {
 }
 
 /**
+ * 1-Click Clipboard Copy Handler for Real Local PNG Images.
+ */
+async function copyRasterImageFromCard(btn) {
+  const card = btn.closest(".ai-raster-image-card");
+  if (!card) return;
+  const img = card.querySelector("img");
+  if (!img) return;
+
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(img.src);
+    const blob = await res.blob();
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type || "image/png"]: blob })
+      ]);
+      btn.innerHTML = `<span style="display:inline-flex; align-items:center; gap:0.3rem; color:#34d399;">✓ Copied PNG!</span>`;
+    } else {
+      await navigator.clipboard.writeText(img.src);
+      btn.innerHTML = `<span style="color:#34d399;">✓ Copied Link!</span>`;
+    }
+  } catch (err) {
+    console.warn("Raster clipboard copy failed:", err);
+    btn.innerHTML = `<span style="color:#f87171;">Copy Failed</span>`;
+  }
+
+  setTimeout(() => {
+    btn.innerHTML = originalHtml;
+    btn.disabled = false;
+  }, 2000);
+}
+
+/**
  * 1-Click Code Copy Handler with User Feedback.
  */
 function copyCode(btn) {
@@ -2521,6 +2867,15 @@ function renderMarkdown(text) {
   text = text.replace(videoCardRegex, (match, cardHtml) => {
     const token = `__AI_VIDEO_CARD_TOKEN_${videoCards.length}__`;
     videoCards.push(cardHtml.trim());
+    return token;
+  });
+
+  // 0b. Extract Real AI Raster Image Cards (PNG/JPEG Direct Renders)
+  const realImageCards = [];
+  const realImageCardRegex = /<!-- AI_REAL_IMAGE_START -->\s*([\s\S]*?)\s*<!-- AI_REAL_IMAGE_END -->/gi;
+  text = text.replace(realImageCardRegex, (match, cardHtml) => {
+    const token = `__AI_REAL_IMAGE_TOKEN_${realImageCards.length}__`;
+    realImageCards.push(cardHtml.trim());
     return token;
   });
 
@@ -2645,6 +3000,11 @@ function renderMarkdown(text) {
     processed = processed.replace(`__AI_VIDEO_CARD_TOKEN_${idx}__`, card);
   });
 
+  // 14. Restore Real AI Raster Image Cards (PNG/JPEG)
+  realImageCards.forEach((card, idx) => {
+    processed = processed.replace(`__AI_REAL_IMAGE_TOKEN_${idx}__`, card);
+  });
+
   return `<p>${processed}</p>`;
 }
 
@@ -2662,6 +3022,36 @@ function toggleVideoPlayback(btn) {
   }
 }
 window.toggleVideoPlayback = toggleVideoPlayback;
+
+function toggleRealVideoPlayback(btn) {
+  const card = btn.closest(".ai-video-card");
+  if (!card) return;
+  const video = card.querySelector("video.real-ai-video-element");
+  const textSpan = btn.querySelector("span");
+
+  if (video && video.style.display !== "none") {
+    if (video.paused) {
+      video.play();
+      card.classList.remove("is-paused");
+      if (textSpan) textSpan.textContent = "Pause";
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg><span>Pause</span>`;
+    } else {
+      video.pause();
+      card.classList.add("is-paused");
+      if (textSpan) textSpan.textContent = "Play";
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Play</span>`;
+    }
+  } else {
+    const isPaused = card.classList.toggle("is-paused");
+    if (textSpan) textSpan.textContent = isPaused ? "Play" : "Pause";
+    if (isPaused) {
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Play</span>`;
+    } else {
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg><span>Pause</span>`;
+    }
+  }
+}
+window.toggleRealVideoPlayback = toggleRealVideoPlayback;
 
 function downloadVideoFromCard(btn, filename = "modeldock-cinema") {
   const card = btn.closest(".ai-video-card");
@@ -2688,3 +3078,628 @@ function downloadVideoFromCard(btn, filename = "modeldock-cinema") {
   }
 }
 window.downloadVideoFromCard = downloadVideoFromCard;
+
+/**
+ * ==========================================================================
+ * ModelDock High-Resolution Image Zoom & Pan Lightbox Controller
+ * ==========================================================================
+ */
+let lightboxState = {
+  isOpen: false,
+  mediaType: "image", // "image" | "video"
+  scale: 1.0,
+  minScale: 0.35,
+  maxScale: 8.0,
+  translateX: 0,
+  translateY: 0,
+  isDragging: false,
+  dragStartX: 0,
+  dragStartY: 0,
+  currentSrc: "",
+  currentTitle: "",
+  baseW: 800,
+  baseH: 600,
+  naturalW: 0,
+  naturalH: 0,
+  isCrispMode: false,
+  isLooping: true,
+  videoPlaybackRate: 1.0
+};
+
+function calculateLightboxBaseDimensions() {
+  const img = document.getElementById("lightbox-img");
+  const vid = document.getElementById("lightbox-video");
+  let natW = 800;
+  let natH = 600;
+
+  if (lightboxState.mediaType === "video" && vid) {
+    natW = vid.videoWidth || 640;
+    natH = vid.videoHeight || 480;
+  } else if (img) {
+    natW = img.naturalWidth || lightboxState.naturalW || 800;
+    natH = img.naturalHeight || lightboxState.naturalH || 600;
+  }
+  lightboxState.naturalW = natW;
+  lightboxState.naturalH = natH;
+
+  const maxFitW = Math.max(300, window.innerWidth * 0.88);
+  const maxFitH = Math.max(300, window.innerHeight * 0.80);
+  const aspect = natW / (natH || 1);
+
+  let w = maxFitW;
+  let h = maxFitW / aspect;
+  if (h > maxFitH) {
+    h = maxFitH;
+    w = maxFitH * aspect;
+  }
+  lightboxState.baseW = Math.round(w);
+  lightboxState.baseH = Math.round(h);
+}
+
+function openImageLightbox(src, title = "Generated Artwork") {
+  if (!src) return;
+  const modal = document.getElementById("modal-image-lightbox");
+  const img = document.getElementById("lightbox-img");
+  const vid = document.getElementById("lightbox-video");
+  const titleEl = document.getElementById("lightbox-image-title");
+  const dlLink = document.getElementById("lightbox-download-link");
+  const dlText = document.getElementById("lightbox-download-text");
+  const btnEnhance = document.getElementById("btn-lightbox-enhance");
+  const btnCrisp = document.getElementById("btn-lightbox-crisp");
+  const btnLoop = document.getElementById("btn-lightbox-loop");
+  const btnSpeed = document.getElementById("btn-lightbox-speed");
+  const btnCopy = document.getElementById("btn-lightbox-copy");
+
+  if (!modal || !img) return;
+
+  lightboxState.isOpen = true;
+  lightboxState.mediaType = "image";
+  lightboxState.scale = 1.0;
+  lightboxState.translateX = 0;
+  lightboxState.translateY = 0;
+  lightboxState.currentSrc = src;
+  lightboxState.currentTitle = title;
+
+  // Toggle visible controls for image
+  const btnPlay = document.getElementById("btn-lightbox-play");
+  if (btnPlay) btnPlay.style.display = "none";
+  if (vid) {
+    vid.pause();
+    vid.style.display = "none";
+    vid.src = "";
+  }
+  if (img) img.style.display = "block";
+  if (btnEnhance) btnEnhance.style.display = "inline-flex";
+  if (btnCrisp) btnCrisp.style.display = "inline-flex";
+  if (btnCopy) btnCopy.style.display = "inline-flex";
+  if (btnLoop) btnLoop.style.display = "none";
+  if (btnSpeed) btnSpeed.style.display = "none";
+  if (dlText) dlText.textContent = "Download";
+
+  img.onload = () => {
+    calculateLightboxBaseDimensions();
+    updateLightboxTransform();
+  };
+
+  img.src = src;
+  img.alt = title;
+  if (img.complete && img.naturalWidth) {
+    calculateLightboxBaseDimensions();
+  }
+
+  if (titleEl) titleEl.textContent = title || "High-Resolution Render";
+
+  if (dlLink) {
+    dlLink.href = src;
+    const filename = src.split("/").pop().split("?")[0] || "modeldock_artwork.png";
+    dlLink.download = filename;
+  }
+
+  updateLightboxTransform();
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+window.openImageLightbox = openImageLightbox;
+
+function openVideoLightbox(videoSrc, title = "Cinematic AI Video", fallbackWebp = "", mp4DownloadUrl = "") {
+  if (!videoSrc && !fallbackWebp && !mp4DownloadUrl) return;
+  const modal = document.getElementById("modal-image-lightbox");
+  const img = document.getElementById("lightbox-img");
+  const vid = document.getElementById("lightbox-video");
+  const titleEl = document.getElementById("lightbox-image-title");
+  const dlLink = document.getElementById("lightbox-download-link");
+  const dlText = document.getElementById("lightbox-download-text");
+  const btnEnhance = document.getElementById("btn-lightbox-enhance");
+  const btnCrisp = document.getElementById("btn-lightbox-crisp");
+  const btnLoop = document.getElementById("btn-lightbox-loop");
+  const btnSpeed = document.getElementById("btn-lightbox-speed");
+  const btnCopy = document.getElementById("btn-lightbox-copy");
+  const btnPlay = document.getElementById("btn-lightbox-play");
+  const playText = document.getElementById("lightbox-play-text");
+  const playIcon = document.getElementById("lightbox-play-icon");
+
+  if (!modal) return;
+
+  lightboxState.isOpen = true;
+  lightboxState.mediaType = "video";
+  lightboxState.scale = 1.0;
+  lightboxState.translateX = 0;
+  lightboxState.translateY = 0;
+  lightboxState.currentTitle = title;
+
+  // Resolve genuine H.264 MP4 stream URL
+  let downloadTarget = mp4DownloadUrl || (videoSrc && videoSrc.includes(".mp4") ? videoSrc : "");
+  if (!downloadTarget && videoSrc && videoSrc.includes("generated/video_")) {
+    downloadTarget = videoSrc.replace(/\.webp($|\?)/, ".mp4$1");
+  }
+  if (!downloadTarget) downloadTarget = videoSrc || fallbackWebp;
+  lightboxState.currentSrc = downloadTarget;
+
+  // Toggle visible controls for video
+  if (btnEnhance) btnEnhance.style.display = "none";
+  if (btnCrisp) btnCrisp.style.display = "none";
+  if (btnCopy) btnCopy.style.display = "none";
+  if (btnPlay) {
+    btnPlay.style.display = "inline-flex";
+    if (playText) playText.textContent = "Play";
+  }
+  if (btnLoop) btnLoop.style.display = "inline-flex";
+  if (btnSpeed) btnSpeed.style.display = "inline-flex";
+  if (dlText) dlText.textContent = "Download MP4";
+
+  if (titleEl) titleEl.textContent = title || "Cinematic AI Video Render";
+
+  if (dlLink) {
+    dlLink.href = downloadTarget;
+    const filename = downloadTarget.split("/").pop().split("?")[0] || "modeldock_cinema.mp4";
+    dlLink.download = filename;
+  }
+
+  // Resolve playable video source (MP4 / WebM)
+  let playSource = "";
+  if (downloadTarget && (downloadTarget.includes(".mp4") || downloadTarget.includes(".webm"))) {
+    playSource = downloadTarget;
+  } else if (videoSrc && (videoSrc.includes(".mp4") || videoSrc.includes(".webm"))) {
+    playSource = videoSrc;
+  } else if (mp4DownloadUrl && (mp4DownloadUrl.includes(".mp4") || mp4DownloadUrl.includes(".webm"))) {
+    playSource = mp4DownloadUrl;
+  }
+
+  // Fallback to high-framerate animated WebP only if MP4 cannot be played
+  function switchToWebpFallback() {
+    if (!fallbackWebp && !videoSrc) return;
+    const streamUrl = fallbackWebp || videoSrc;
+    if (vid) {
+      vid.pause();
+      vid.style.display = "none";
+      vid.src = "";
+    }
+    if (img) {
+      img.style.display = "block";
+      img.onload = () => {
+        calculateLightboxBaseDimensions();
+        updateLightboxTransform();
+      };
+      img.src = streamUrl;
+      calculateLightboxBaseDimensions();
+      updateLightboxTransform();
+    }
+  }
+
+  if (vid && playSource) {
+    if (img) img.style.display = "none";
+    vid.style.display = "block";
+    vid.controls = true;
+
+    vid.onerror = (e) => {
+      console.warn("HTML5 video error, checking fallback:", e);
+      if (!playSource.includes(".mp4") && fallbackWebp) {
+        switchToWebpFallback();
+      }
+    };
+
+    vid.onloadedmetadata = () => {
+      calculateLightboxBaseDimensions();
+      updateLightboxTransform();
+    };
+
+    vid.onplay = () => {
+      if (playText) playText.textContent = "Pause";
+      if (playIcon) playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>';
+    };
+
+    vid.onpause = () => {
+      if (playText) playText.textContent = "Play";
+      if (playIcon) playIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"></polygon>';
+    };
+
+    vid.src = playSource;
+    vid.loop = lightboxState.isLooping;
+    vid.playbackRate = lightboxState.videoPlaybackRate;
+    
+    const playPromise = vid.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        if (playText) playText.textContent = "Pause";
+        if (playIcon) playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>';
+      }).catch(() => {
+        // Autoplay policy: video stays paused and ready for user click
+        if (playText) playText.textContent = "Play";
+        if (playIcon) playIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"></polygon>';
+      });
+    }
+  } else {
+    switchToWebpFallback();
+  }
+
+  calculateLightboxBaseDimensions();
+  updateLightboxTransform();
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+window.openVideoLightbox = openVideoLightbox;
+
+function toggleLightboxPlayPause() {
+  const vid = document.getElementById("lightbox-video");
+  const playText = document.getElementById("lightbox-play-text");
+  const playIcon = document.getElementById("lightbox-play-icon");
+  if (!vid || vid.style.display === "none") return;
+
+  if (vid.paused) {
+    vid.play();
+    if (playText) playText.textContent = "Pause";
+    if (playIcon) playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>';
+  } else {
+    vid.pause();
+    if (playText) playText.textContent = "Play";
+    if (playIcon) playIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"></polygon>';
+  }
+}
+window.toggleLightboxPlayPause = toggleLightboxPlayPause;
+
+function toggleLightboxVideoLoop() {
+  const vid = document.getElementById("lightbox-video");
+  const textEl = document.getElementById("lightbox-loop-text");
+  if (!vid) return;
+  lightboxState.isLooping = !lightboxState.isLooping;
+  vid.loop = lightboxState.isLooping;
+  if (textEl) textEl.textContent = lightboxState.isLooping ? "Loop: ON" : "Loop: OFF";
+}
+window.toggleLightboxVideoLoop = toggleLightboxVideoLoop;
+
+function cycleLightboxVideoSpeed() {
+  const vid = document.getElementById("lightbox-video");
+  const textEl = document.getElementById("lightbox-speed-text");
+  if (!vid) return;
+  const speeds = [1.0, 1.5, 2.0, 0.5];
+  const idx = speeds.indexOf(lightboxState.videoPlaybackRate);
+  lightboxState.videoPlaybackRate = speeds[(idx + 1) % speeds.length];
+  vid.playbackRate = lightboxState.videoPlaybackRate;
+  if (textEl) textEl.textContent = `${lightboxState.videoPlaybackRate}x`;
+}
+window.cycleLightboxVideoSpeed = cycleLightboxVideoSpeed;
+
+function closeImageLightbox() {
+  const modal = document.getElementById("modal-image-lightbox");
+  const vid = document.getElementById("lightbox-video");
+  if (vid) {
+    vid.pause();
+    vid.src = "";
+  }
+  if (!modal) return;
+  modal.classList.add("hidden");
+  lightboxState.isOpen = false;
+  document.body.style.overflow = "";
+}
+window.closeImageLightbox = closeImageLightbox;
+
+function handleLightboxBackdropClick(e) {
+  if (e.target.id === "modal-image-lightbox" || e.target.id === "lightbox-viewport") {
+    closeImageLightbox();
+  }
+}
+window.handleLightboxBackdropClick = handleLightboxBackdropClick;
+
+function updateLightboxTransform() {
+  const img = document.getElementById("lightbox-img");
+  const vid = document.getElementById("lightbox-video");
+  const badge = document.getElementById("lightbox-zoom-badge");
+  const targetEl = lightboxState.mediaType === "video" ? vid : img;
+  if (!targetEl) return;
+
+  const currentW = Math.round(lightboxState.baseW * lightboxState.scale);
+  const currentH = Math.round(lightboxState.baseH * lightboxState.scale);
+
+  targetEl.style.width = currentW + "px";
+  targetEl.style.height = currentH + "px";
+  targetEl.style.maxWidth = "none";
+  targetEl.style.maxHeight = "none";
+  targetEl.style.transform = `translate(${lightboxState.translateX}px, ${lightboxState.translateY}px)`;
+
+  if (badge) {
+    const pct = Math.round(lightboxState.scale * 100);
+    const mediaTag = lightboxState.mediaType === "video" ? "Cinema MP4" : "Native";
+    const nat = lightboxState.naturalW ? ` • ${lightboxState.naturalW}×${lightboxState.naturalH} ${mediaTag}` : "";
+    badge.textContent = `${pct}% (${currentW}×${currentH}px${nat})`;
+  }
+}
+
+function toggleLightboxCrispMode() {
+  const img = document.getElementById("lightbox-img");
+  const btn = document.getElementById("btn-lightbox-crisp");
+  const textEl = document.getElementById("lightbox-crisp-text");
+  if (!img) return;
+
+  lightboxState.isCrispMode = !lightboxState.isCrispMode;
+  if (lightboxState.isCrispMode) {
+    img.classList.add("crisp-pixel-mode");
+    if (textEl) textEl.textContent = "Sharp Mode: ON";
+    if (btn) btn.style.borderColor = "var(--color-primary-light, #60a5fa)";
+  } else {
+    img.classList.remove("crisp-pixel-mode");
+    if (textEl) textEl.textContent = "Sharp Pixels";
+    if (btn) btn.style.borderColor = "";
+  }
+}
+window.toggleLightboxCrispMode = toggleLightboxCrispMode;
+
+function zoomLightboxImage(delta) {
+  const newScale = Math.min(lightboxState.maxScale, Math.max(lightboxState.minScale, lightboxState.scale + delta));
+  lightboxState.scale = Number(newScale.toFixed(2));
+  if (lightboxState.scale <= 1.0) {
+    lightboxState.translateX = 0;
+    lightboxState.translateY = 0;
+  }
+  updateLightboxTransform();
+}
+window.zoomLightboxImage = zoomLightboxImage;
+
+function resetLightboxZoom() {
+  lightboxState.scale = 1.0;
+  lightboxState.translateX = 0;
+  lightboxState.translateY = 0;
+  calculateLightboxBaseDimensions();
+  updateLightboxTransform();
+}
+window.resetLightboxZoom = resetLightboxZoom;
+
+function handleLightboxWheel(e) {
+  e.preventDefault();
+  const delta = e.deltaY < 0 ? 0.2 : -0.2;
+  zoomLightboxImage(delta);
+}
+window.handleLightboxWheel = handleLightboxWheel;
+
+function handleLightboxDblClick(e) {
+  e.preventDefault();
+  if (lightboxState.scale > 1.2) {
+    resetLightboxZoom();
+  } else {
+    lightboxState.scale = 2.5;
+    updateLightboxTransform();
+  }
+}
+window.handleLightboxDblClick = handleLightboxDblClick;
+
+function handleLightboxMouseDown(e) {
+  if (e.button !== 0) return; // only left click
+  lightboxState.isDragging = true;
+  lightboxState.dragStartX = e.clientX - lightboxState.translateX;
+  lightboxState.dragStartY = e.clientY - lightboxState.translateY;
+  const viewport = document.getElementById("lightbox-viewport");
+  if (viewport) viewport.classList.add("panning");
+}
+window.handleLightboxMouseDown = handleLightboxMouseDown;
+
+window.addEventListener("mousemove", (e) => {
+  if (!lightboxState.isDragging || !lightboxState.isOpen) return;
+  lightboxState.translateX = e.clientX - lightboxState.dragStartX;
+  lightboxState.translateY = e.clientY - lightboxState.dragStartY;
+  updateLightboxTransform();
+});
+
+window.addEventListener("mouseup", () => {
+  if (lightboxState.isDragging) {
+    lightboxState.isDragging = false;
+    const viewport = document.getElementById("lightbox-viewport");
+    if (viewport) viewport.classList.remove("panning");
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (lightboxState.isOpen) {
+    calculateLightboxBaseDimensions();
+    updateLightboxTransform();
+  }
+});
+
+window.addEventListener("keydown", (e) => {
+  if (!lightboxState.isOpen) return;
+  if (e.key === "Escape") {
+    closeImageLightbox();
+  } else if (e.key === " " || e.code === "Space") {
+    if (lightboxState.mediaType === "video") {
+      e.preventDefault();
+      toggleLightboxPlayPause();
+    }
+  } else if (e.key === "+" || e.key === "=") {
+    zoomLightboxImage(0.25);
+  } else if (e.key === "-" || e.key === "_") {
+    zoomLightboxImage(-0.25);
+  } else if (e.key === "0") {
+    resetLightboxZoom();
+  }
+});
+
+async function copyLightboxImage() {
+  if (!lightboxState.currentSrc) return;
+  try {
+    const res = await fetch(lightboxState.currentSrc);
+    const blob = await res.blob();
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob })
+    ]);
+    const badge = document.getElementById("lightbox-zoom-badge");
+    if (badge) {
+      const prev = badge.textContent;
+      badge.textContent = "✓ Copied!";
+      setTimeout(() => { badge.textContent = prev; }, 1500);
+    }
+  } catch (err) {
+    console.error("Failed to copy image", err);
+  }
+}
+window.copyLightboxImage = copyLightboxImage;
+
+// Global Delegated Click Listener for All Generated Images, Videos and Attachments
+document.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!target) return;
+
+  // Ignore clicks on action buttons or links inside cards
+  if (target.closest("button") || target.closest("a")) return;
+
+  // 1. Image Click
+  if (target.tagName === "IMG") {
+    if (target.classList.contains("generated-real-photo") || 
+        target.closest(".ai-raster-viewport") || 
+        target.closest(".message-attachments")) {
+      e.stopPropagation();
+      openImageLightbox(target.src, target.alt || "Generated Artwork");
+      return;
+    } else if (target.classList.contains("real-ai-video-fallback") || target.closest(".ai-video-viewport")) {
+      e.stopPropagation();
+      const card = target.closest(".ai-video-card");
+      const videoEl = card ? card.querySelector("video") : null;
+      const sourceEl = videoEl ? videoEl.querySelector("source") : null;
+      const mp4Url = card?.querySelector("a.btn-video-download")?.href || (sourceEl ? sourceEl.src : "") || (videoEl ? (videoEl.currentSrc || videoEl.src) : "");
+      const title = card ? (card.getAttribute("data-title") || "Cinematic Video") : "Cinematic Video";
+      openVideoLightbox(mp4Url || target.src, title, target.src, mp4Url);
+      return;
+    }
+  }
+
+  // 2. Video Element or Video Viewport Click in Chat
+  const videoViewport = target.closest(".ai-video-viewport");
+  if (videoViewport || target.tagName === "VIDEO") {
+    // If the click is on native video control bar itself, let native controls handle it
+    if (target.tagName === "VIDEO" && e.offsetY > target.clientHeight - 48) {
+      return;
+    }
+    e.stopPropagation();
+    const card = target.closest(".ai-video-card") || videoViewport?.closest(".ai-video-card");
+    const title = card ? (card.getAttribute("data-title") || "Cinematic Video") : "Cinematic Video";
+    const videoEl = card ? card.querySelector("video") : null;
+    const sourceEl = videoEl ? videoEl.querySelector("source") : null;
+    const webpImg = card ? card.querySelector("img.real-ai-video-fallback") : null;
+    const mp4Url = card?.querySelector("a.btn-video-download")?.href || (sourceEl ? sourceEl.src : "") || (videoEl ? (videoEl.currentSrc || videoEl.src) : "");
+    const playUrl = mp4Url || (videoEl ? (videoEl.currentSrc || videoEl.src) : (webpImg ? webpImg.src : ""));
+    openVideoLightbox(playUrl, title, webpImg ? webpImg.src : "", mp4Url);
+  }
+});
+
+async function enhanceCurrentLightboxImage(scale = 4) {
+  if (!lightboxState.currentSrc) return;
+  const btn = document.getElementById("btn-lightbox-enhance");
+  const textEl = document.getElementById("lightbox-enhance-text");
+  const titleEl = document.getElementById("lightbox-image-title");
+  const imgEl = document.getElementById("lightbox-img");
+  const dlLink = document.getElementById("lightbox-download-link");
+
+  const originalSrc = lightboxState.currentSrc;
+  const filename = originalSrc.split("/").pop().split("?")[0];
+
+  if (btn) btn.disabled = true;
+  if (textEl) textEl.textContent = "⏳ Enhancing to 8K...";
+
+  try {
+    const res = await fetch("/api/media/enhance-8k", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: filename, scale: scale }),
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const newUrl = data.url + `?t=${Date.now()}`;
+      lightboxState.currentSrc = newUrl;
+      if (imgEl) {
+        imgEl.onload = () => {
+          calculateLightboxBaseDimensions();
+          updateLightboxTransform();
+        };
+        imgEl.src = newUrl;
+      }
+      if (dlLink) {
+        dlLink.href = newUrl;
+        dlLink.download = data.filename || "enhanced_8k.png";
+      }
+      if (titleEl) {
+        titleEl.textContent = `${lightboxState.currentTitle || "Artwork"} ✨ 8K UHD (${data.width} × ${data.height})`;
+      }
+      if (textEl) textEl.textContent = "✓ 8K Enhanced";
+
+      // Also update any matching image cards in chat view
+      document.querySelectorAll(`img[src*="${filename}"]`).forEach((chatImg) => {
+        chatImg.src = newUrl;
+        const card = chatImg.closest(".ai-raster-image-card");
+        if (card) {
+          const pill = card.querySelector(".ai-image-res-pill");
+          if (pill) pill.textContent = `✨ 8K UHD (${data.width} × ${data.height})`;
+        }
+      });
+    } else {
+      alert(`Enhance error: ${data.detail || data.error || "Failed to enhance image"}`);
+      if (textEl) textEl.textContent = "✨ 8K Enhance";
+    }
+  } catch (err) {
+    alert(`Enhancement request failed: ${err.message}`);
+    if (textEl) textEl.textContent = "✨ 8K Enhance";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.enhanceCurrentLightboxImage = enhanceCurrentLightboxImage;
+
+async function enhanceImageTo8K(btn, imgUrl) {
+  if (!imgUrl) return;
+  const filename = imgUrl.split("/").pop().split("?")[0];
+  const origText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳ Enhancing...</span>`;
+  }
+  try {
+    const res = await fetch("/api/media/enhance-8k", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: filename, scale: 4 }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const newUrl = data.url + `?t=${Date.now()}`;
+      const card = btn ? btn.closest(".ai-raster-image-card") : null;
+      if (card) {
+        const img = card.querySelector("img");
+        if (img) img.src = newUrl;
+        const dlBtn = card.querySelector(".btn-image-download");
+        if (dlBtn) {
+          dlBtn.href = newUrl;
+          dlBtn.download = data.filename;
+        }
+        const pill = card.querySelector(".ai-image-res-pill");
+        if (pill) pill.textContent = `✨ 8K UHD (${data.width} × ${data.height})`;
+      }
+      if (btn) btn.innerHTML = `<span>✓ 8K Done</span>`;
+    } else {
+      alert(`Enhancement failed: ${data.detail || data.error || "Unknown"}`);
+      if (btn) btn.innerHTML = origText;
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+    if (btn) btn.innerHTML = origText;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.enhanceImageTo8K = enhanceImageTo8K;

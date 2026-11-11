@@ -58,6 +58,13 @@ function initHFHub() {
     sortSelect.addEventListener("change", () => searchHFHub());
   }
 
+  const platformSelect = document.getElementById("hub-platform-filter");
+  if (platformSelect) {
+    platformSelect.addEventListener("change", (e) => {
+      setPlatformFilter(e.target.value);
+    });
+  }
+
   if (btnFeatured) {
     btnFeatured.addEventListener("click", () => {
       if (queryInput) queryInput.value = "";
@@ -305,31 +312,71 @@ function clearCompletedDownloads() {
   }
 }
 
+function setPlatformFilter(platform) {
+  const select = document.getElementById("hub-platform-filter");
+  if (select && select.value !== platform) {
+    select.value = platform;
+  }
+  document.querySelectorAll(".platform-chip").forEach((chip) => {
+    if (chip.getAttribute("data-platform") === platform) {
+      chip.classList.add("active");
+    } else {
+      chip.classList.remove("active");
+    }
+  });
+
+  const queryInput = document.getElementById("hf-search-query");
+  const q = queryInput ? queryInput.value.trim() : "";
+  if (q) {
+    searchHFHub(q);
+  } else {
+    loadFeaturedHFModels();
+  }
+}
+
 async function loadFeaturedHFModels() {
   const grid = document.getElementById("hf-models-grid");
   const title = document.getElementById("hub-grid-title");
-  if (title) title.textContent = "⭐ Featured & Popular Open-Source Models";
-  if (grid) grid.innerHTML = '<div class="loading-spinner">Loading curated models...</div>';
+  const platformSelect = document.getElementById("hub-platform-filter");
+  const platform = platformSelect ? platformSelect.value : "all";
+
+  const platformTitle = platform === "ollama" ? "Ollama Library" : (platform === "huggingface" ? "Hugging Face Hub" : "Hugging Face & Ollama");
+  if (title) title.textContent = `⭐ Featured & Popular Open-Source Models (${platformTitle})`;
+  if (grid) grid.innerHTML = `<div class="loading-spinner">Loading ${platformTitle} catalog...</div>`;
 
   try {
-    const res = await fetch("/api/hf/featured");
-    const models = await res.json();
-    renderFeaturedCards(models);
+    let hfPromise = Promise.resolve([]);
+    let ollamaPromise = Promise.resolve([]);
+
+    if (platform === "all" || platform === "huggingface") {
+      hfPromise = fetch("/api/hf/featured").then((r) => r.json()).catch(() => []);
+    }
+    if (platform === "all" || platform === "ollama") {
+      ollamaPromise = fetch("/api/ollama/featured").then((r) => r.json()).catch(() => []);
+    }
+
+    const [hfModels, ollamaModels] = await Promise.all([hfPromise, ollamaPromise]);
+    let cardsHtml = "";
+    if (ollamaModels && ollamaModels.length > 0) {
+      cardsHtml += ollamaModels.map((m) => renderOllamaCardHTML(m)).join("");
+    }
+    if (hfModels && hfModels.length > 0) {
+      cardsHtml += renderFeaturedCards(hfModels);
+    }
+    if (!cardsHtml) {
+      if (grid) grid.innerHTML = '<div class="empty-state">No models found.</div>';
+    } else {
+      if (grid) grid.innerHTML = cardsHtml;
+    }
   } catch (err) {
     if (grid) grid.innerHTML = `<div class="empty-state">Failed to load models: ${err.message}</div>`;
   }
 }
 
 function renderFeaturedCards(models) {
-  const grid = document.getElementById("hf-models-grid");
-  if (!grid) return;
+  if (!models || models.length === 0) return "";
 
-  if (!models || models.length === 0) {
-    grid.innerHTML = '<div class="empty-state">No models found.</div>';
-    return;
-  }
-
-  grid.innerHTML = models
+  return models
     .map((m) => {
       const gatedBadge = m.gated
         ? '<span class="badge badge-gated">🔒 Gated</span>'
@@ -343,7 +390,10 @@ function renderFeaturedCards(models) {
               <div class="model-name" title="${m.name}">${m.name}</div>
               <div class="model-author" title="${m.id}">${m.id}</div>
             </div>
-            ${gatedBadge}
+            <div style="display: flex; gap: 0.35rem; align-items: center;">
+              <span class="badge" style="background: rgba(251, 146, 60, 0.15); color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.35);">🤗 Hugging Face</span>
+              ${gatedBadge}
+            </div>
           </div>
           <p class="card-desc" title="${m.description}">${m.description}</p>
           <div class="tags-row">
@@ -429,6 +479,97 @@ function renderInstalledCardHTML(m) {
   `;
 }
 
+function renderOllamaCardHTML(m) {
+  const safeName = escapeHubHtml(m.name || m.tag || "Unknown");
+  const safeTag = escapeHubHtml(m.tag || m.id || "");
+  const rawTag = (m.tag || m.id || "").replace(/'/g, "\\'");
+  const rawName = (m.name || m.tag || "").replace(/'/g, "\\'");
+  const repoId = (m.repo_id || m.id || m.tag || "").replace(/'/g, "\\'");
+  const inspectTarget = rawTag || repoId;
+
+  // Check if already installed
+  const isInstalled = (AppState.localModels || []).some((lm) => {
+    const lName = (lm.name || "").toLowerCase();
+    const lTag = (m.tag || m.id || "").toLowerCase();
+    return lName.includes(lTag) || (lm.alias && lm.alias.toLowerCase().includes(lTag));
+  });
+
+  const actionButton = isInstalled
+    ? `<button class="btn-primary btn-sm" onclick="event.stopPropagation(); selectModelAndChat('${rawName}')" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-color: #059669; font-weight: 600;">
+         <span>Run in Chat</span> 💬
+       </button>`
+    : `<button class="btn-primary btn-sm" onclick="event.stopPropagation(); pullOllamaDirect('${rawTag}', '${rawName}')" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%); border-color: #0284c7; font-weight: 600;">
+         <span>Pull Model</span> ⬇️
+       </button>`;
+
+  return `
+    <div class="model-card" onclick="openInspectModal('${inspectTarget}', '${rawTag}')" style="cursor: pointer; border: 1px solid rgba(56, 189, 248, 0.25);" title="Click to view complete ${safeName} specifications, parameters, and architecture">
+      <div class="card-top">
+        <div class="card-header-row">
+          <div class="card-header-titles">
+            <div class="model-name" title="${safeName}" style="display: flex; align-items: center; gap: 0.35rem;">
+              <span>🦙</span>
+              <span>${safeName}</span>
+            </div>
+            <div class="model-author" title="${safeTag}">${safeTag} • Ollama Library</div>
+          </div>
+          <span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">🦙 Ollama</span>
+        </div>
+        <p class="card-desc" title="${escapeHubHtml(m.description || '')}" style="color: var(--text-secondary); font-size: 0.8rem; margin: 0.35rem 0;">
+          ${escapeHubHtml(m.description || "Official model optimized for local inference.")}
+        </p>
+        <div class="tags-row">
+          ${m.parameters ? `<span class="badge badge-cyan">${escapeHubHtml(m.parameters)}</span>` : ""}
+          ${m.size ? `<span class="badge">💾 ${escapeHubHtml(m.size)}</span>` : ""}
+          ${m.family ? `<span class="badge">${escapeHubHtml(m.family)}</span>` : ""}
+          ${m.category ? `<span class="badge badge-rec">${escapeHubHtml(m.category)}</span>` : ""}
+        </div>
+      </div>
+      <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem;">
+        <div class="card-stats">
+          <span class="card-stat-item" title="Popularity in Ollama Library">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: #38bdf8;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>${escapeHubHtml(m.pull_count || m.downloads || "Popular")}</span>
+          </span>
+        </div>
+        <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <button class="btn-secondary btn-sm" onclick="event.stopPropagation(); openInspectModal('${inspectTarget}', '${rawTag}')" title="Inspect model specifications, context window, and architecture">
+            🔍 Specs &amp; Details
+          </button>
+          ${actionButton}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function pullOllamaDirect(tag, name) {
+  if (!tag) return;
+  const displayName = name || tag;
+  if (!confirm(`Do you want to 1-click pull "${displayName}" (${tag}) from Ollama Library into your local library?`)) {
+    return;
+  }
+  try {
+    const res = await fetch("/api/downloads/pull-ollama", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_name: tag }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (typeof showToast === "function") {
+        showToast(`Started downloading ${displayName}...`, "success");
+      }
+      pollDownloadTasks();
+      switchTab("downloads");
+    } else {
+      alert(`Pull failed: ${data.detail || data.error || "Unknown error"}`);
+    }
+  } catch (err) {
+    alert(`Pull request error: ${err.message}`);
+  }
+}
+
 function renderHFCardHTML(m) {
   const safeName = escapeHubHtml(m.name || m.id || "Unknown");
   const safeId = escapeHubHtml(m.id || "");
@@ -445,7 +586,10 @@ function renderHFCardHTML(m) {
             <div class="model-name" title="${safeName}">${safeName}</div>
             <div class="model-author" title="${safeId}">${safeId}</div>
           </div>
-          ${gatedBadge}
+          <div style="display: flex; gap: 0.35rem; align-items: center;">
+            <span class="badge" style="background: rgba(251, 146, 60, 0.15); color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.35);">🤗 Hugging Face</span>
+            ${gatedBadge}
+          </div>
         </div>
         <div class="tags-row">
           ${(m.tags || []).slice(0, 3).map((t) => `<span class="badge">${escapeHubHtml(t)}</span>`).join("")}
@@ -475,7 +619,11 @@ function renderHFCardHTML(m) {
 function renderLiveSearchPreview(q) {
   const grid = document.getElementById("hf-models-grid");
   const title = document.getElementById("hub-grid-title");
-  if (title) title.textContent = `🔍 Search Results for "${q}" (GGUF Models)`;
+  const platformSelect = document.getElementById("hub-platform-filter");
+  const platform = platformSelect ? platformSelect.value : "all";
+  const platformTitle = platform === "ollama" ? "Ollama Library" : (platform === "huggingface" ? "Hugging Face Hub" : "All Platforms");
+
+  if (title) title.textContent = `🔍 Search Results for "${q}" (${platformTitle})`;
   if (!grid) return;
 
   const qLower = q.toLowerCase();
@@ -493,14 +641,14 @@ function renderLiveSearchPreview(q) {
     html += `
       <div class="model-card" style="border: 1px dashed var(--border-subtle); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 180px; text-align: center; color: var(--text-muted); background: rgba(255, 255, 255, 0.01);">
         <div class="loading-spinner-sm" style="margin-bottom: 0.5rem;"></div>
-        <span style="font-size: 0.84rem;">Searching Hugging Face Hub for "<strong>${escapeHubHtml(q)}</strong>"...</span>
+        <span style="font-size: 0.84rem;">Searching ${platformTitle} for "<strong>${escapeHubHtml(q)}</strong>"...</span>
       </div>
     `;
     grid.innerHTML = html;
   } else {
     grid.innerHTML = `
       <div class="loading-spinner" style="grid-column: 1 / -1; padding: 3rem 1rem;">
-        Searching open-source model catalog for "<strong>${escapeHubHtml(q)}</strong>"...
+        Searching ${platformTitle} for "<strong>${escapeHubHtml(q)}</strong>"...
       </div>
     `;
   }
@@ -509,18 +657,21 @@ function renderLiveSearchPreview(q) {
 async function searchHFHub(customQuery) {
   const queryInput = document.getElementById("hf-search-query");
   const sortSelect = document.getElementById("hf-sort-select");
+  const platformSelect = document.getElementById("hub-platform-filter");
   const grid = document.getElementById("hf-models-grid");
   const title = document.getElementById("hub-grid-title");
 
   const query = (typeof customQuery === "string" ? customQuery : (queryInput ? queryInput.value : "")).trim();
   const sort = sortSelect ? sortSelect.value : "downloads";
+  const platform = platformSelect ? platformSelect.value : "all";
 
   if (!query) {
     loadFeaturedHFModels();
     return;
   }
 
-  if (title) title.textContent = `🔍 Search Results for "${query}" (GGUF Models)`;
+  const platformTitle = platform === "ollama" ? "Ollama Library" : (platform === "huggingface" ? "Hugging Face Hub" : "All Platforms");
+  if (title) title.textContent = `🔍 Search Results for "${query}" (${platformTitle})`;
 
   // Match locally installed models (0ms)
   const qLower = query.toLowerCase();
@@ -534,15 +685,30 @@ async function searchHFHub(customQuery) {
   });
 
   try {
-    const res = await fetch(`/api/hf/search?q=${encodeURIComponent(query)}&sort=${sort}&filter=gguf`);
-    const results = (await res.json()) || [];
+    let hfPromise = Promise.resolve([]);
+    let ollamaPromise = Promise.resolve([]);
 
-    if (localMatches.length === 0 && results.length === 0) {
+    if (platform === "all" || platform === "huggingface") {
+      hfPromise = fetch(`/api/hf/search?q=${encodeURIComponent(query)}&sort=${sort}&filter=gguf`)
+        .then((r) => r.json())
+        .catch(() => []);
+    }
+
+    if (platform === "all" || platform === "ollama") {
+      ollamaPromise = fetch(`/api/ollama/search?q=${encodeURIComponent(query)}`)
+        .then((r) => r.json())
+        .catch(() => []);
+    }
+
+    const [hfResults, ollamaResults] = await Promise.all([hfPromise, ollamaPromise]);
+    const totalResults = localMatches.length + (hfResults || []).length + (ollamaResults || []).length;
+
+    if (totalResults === 0) {
       if (grid) {
         grid.innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1;">
-            <h3>No models found matching "${escapeHubHtml(query)}"</h3>
-            <p style="margin-top: 0.5rem; color: var(--text-muted);">Try searching for 'llama', 'deepseek', 'qwen', or 'mistral'.</p>
+            <h3>No models found matching "${escapeHubHtml(query)}" on ${platformTitle}</h3>
+            <p style="margin-top: 0.5rem; color: var(--text-muted);">Try searching for 'llama', 'deepseek', 'qwen', or 'mistral', or select 'All Platforms'.</p>
           </div>
         `;
       }
@@ -553,8 +719,11 @@ async function searchHFHub(customQuery) {
     if (localMatches.length > 0) {
       cardsHtml += localMatches.map((m) => renderInstalledCardHTML(m)).join("");
     }
-    if (results.length > 0) {
-      cardsHtml += results.map((m) => renderHFCardHTML(m)).join("");
+    if (ollamaResults && ollamaResults.length > 0) {
+      cardsHtml += ollamaResults.map((m) => renderOllamaCardHTML(m)).join("");
+    }
+    if (hfResults && hfResults.length > 0) {
+      cardsHtml += hfResults.map((m) => renderHFCardHTML(m)).join("");
     }
 
     if (grid) grid.innerHTML = cardsHtml;
@@ -568,13 +737,14 @@ async function searchHFHub(customQuery) {
 }
 
 // Modal Inspect GGUF Quantizations & Full Model Specs
-async function openInspectModal(repoId) {
+async function openInspectModal(repoId, ollamaTag = "") {
   const modal = document.getElementById("modal-repo-inspect");
   const title = document.getElementById("inspect-modal-title");
   const source = document.getElementById("inspect-modal-source");
   const access = document.getElementById("inspect-modal-access");
   const repoBadge = document.getElementById("inspect-modal-repo-id");
   const sourceLink = document.getElementById("inspect-modal-source-link");
+  const sourceText = document.getElementById("inspect-modal-source-text");
   const desc = document.getElementById("inspect-modal-desc");
   const list = document.getElementById("inspect-files-list");
   const tagsList = document.getElementById("inspect-tags-list");
@@ -587,19 +757,59 @@ async function openInspectModal(repoId) {
   const specTask = document.getElementById("inspect-spec-task");
   const specVram = document.getElementById("inspect-spec-vram");
 
+  const isOllama = Boolean(ollamaTag || (repoId && !repoId.includes("/")));
+  const cleanTag = (ollamaTag || repoId || "").trim();
+
   modal.classList.remove("hidden");
-  title.textContent = "Loading Model Specifications...";
-  repoBadge.textContent = repoId;
-  desc.textContent = "Fetching complete architecture, parameters, license, and GGUF files from source repository...";
-  list.innerHTML = '<div class="loading-spinner">Fetching available GGUF quantizations from source...</div>';
+  title.textContent = isOllama ? `${cleanTag} Specifications` : "Loading Model Specifications...";
+  repoBadge.textContent = isOllama ? `${cleanTag} • Ollama Library` : repoId;
+  if (source) {
+    source.textContent = isOllama ? "🦙 Ollama Library" : "🤗 Hugging Face";
+    source.className = isOllama ? "badge badge-cyan" : "badge";
+  }
+  if (access) {
+    access.textContent = isOllama ? "🔓 Open Access (Local Pull)" : "Open Access";
+    access.className = "badge badge-success";
+  }
+  if (sourceLink) {
+    sourceLink.href = isOllama ? `https://ollama.com/library/${encodeURIComponent(cleanTag)}` : `https://huggingface.co/${repoId}`;
+    sourceLink.title = isOllama ? "Open on Ollama Library" : "Open Repository on Hugging Face";
+  }
+  if (sourceText) {
+    sourceText.textContent = isOllama ? "View on Ollama Library" : "View on Hugging Face";
+  }
+
+  desc.textContent = isOllama 
+    ? `Inspecting official ${cleanTag} architecture, context window, and quantization tiers for Ollama...`
+    : "Fetching complete architecture, parameters, license, and GGUF files from source repository...";
+  list.innerHTML = `<div class="loading-spinner">Fetching available ${isOllama ? "Ollama model tiers" : "GGUF quantizations"} from source...</div>`;
   if (tagsList) tagsList.innerHTML = "";
 
   try {
     const res = await fetch(`/api/hf/inspect?repo_id=${encodeURIComponent(repoId)}`);
     const data = await res.json();
+    const isActuallyOllama = Boolean(data.is_ollama || isOllama || (data.source_platform && data.source_platform.includes("Ollama")));
 
     if (data.error) {
       desc.textContent = data.error;
+      if (isActuallyOllama) {
+        list.innerHTML = `
+          <div class="status-banner" style="background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); padding: 1rem; border-radius: var(--radius-md);">
+            <div style="font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem;">
+              <span>🦙</span>
+              <span>Ollama Library Model: <code>${escapeHubHtml(cleanTag)}</code></span>
+            </div>
+            <p style="margin: 0 0 0.85rem 0; font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45;">
+              This model is available for 1-click execution directly via your local Ollama runtime. No Hugging Face token required.
+            </p>
+            <button class="btn-primary btn-sm" onclick="closeInspectModal(); pullOllamaDirect('${escapeHubHtml(cleanTag)}', '${escapeHubHtml(cleanTag)}')" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%); border-color: #0284c7; font-weight: 600;">
+              ⬇️ Pull via Ollama (${escapeHubHtml(cleanTag)})
+            </button>
+          </div>
+        `;
+        return;
+      }
+
       const isAuthError = /access denied|token|gated|401|403|unauthorized/i.test(data.error);
       list.innerHTML = `
         <div class="status-banner banner-error" style="padding: 0.85rem; border-radius: var(--radius-md);">
@@ -625,14 +835,21 @@ async function openInspectModal(repoId) {
       return;
     }
 
-    title.textContent = data.name || repoId.split("/")[1] || repoId;
-    if (source) source.textContent = `🤗 ${data.source_platform || "Hugging Face"}`;
+    title.textContent = data.name || (repoId.includes("/") ? repoId.split("/")[1] : repoId);
+    if (source) {
+      source.textContent = isActuallyOllama ? "🦙 Ollama Library" : `🤗 ${data.source_platform || "Hugging Face"}`;
+      source.className = isActuallyOllama ? "badge badge-cyan" : "badge";
+    }
     if (access) {
       access.textContent = data.gated ? "🔒 Gated Access" : "🔓 Open Access";
       access.className = data.gated ? "badge badge-gated" : "badge badge-success";
     }
     if (sourceLink) {
-      sourceLink.href = data.source_url || `https://huggingface.co/${repoId}`;
+      sourceLink.href = data.source_url || (isActuallyOllama ? `https://ollama.com/library/${encodeURIComponent(cleanTag)}` : `https://huggingface.co/${repoId}`);
+      sourceLink.title = isActuallyOllama ? "View on Ollama Library" : "Open Repository on Hugging Face";
+    }
+    if (sourceText) {
+      sourceText.textContent = isActuallyOllama ? "View on Ollama Library" : "View on Hugging Face";
     }
 
     // Populate Spec Pills
@@ -651,18 +868,45 @@ async function openInspectModal(repoId) {
       tagsList.innerHTML = data.tags.slice(0, 10).map((t) => `<span class="tag-badge">#${t}</span>`).join(" ");
     }
 
+    const activeOllamaTag = ollamaTag || data.ollama_tag || "";
+    let ollamaBannerHtml = "";
+    if (activeOllamaTag) {
+      ollamaBannerHtml = `
+        <div class="status-banner" style="background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); padding: 0.85rem 1rem; border-radius: var(--radius-md); margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.6rem;">
+          <div>
+            <div style="font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 0.35rem;">
+              <span>🦙</span>
+              <span>1-Click Ollama Pull: <code>${escapeHubHtml(activeOllamaTag)}</code></span>
+            </div>
+            <p style="margin: 0.2rem 0 0; font-size: 0.8rem; color: var(--text-secondary);">Direct download and instant native registration into ModelDock Studio.</p>
+          </div>
+          <button class="btn-primary btn-sm" onclick="closeInspectModal(); pullOllamaDirect('${escapeHubHtml(activeOllamaTag)}', '${escapeHubHtml(title.textContent)}')" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%); border-color: #0284c7; font-weight: 600;">
+            ⬇️ Pull Model (${escapeHubHtml(activeOllamaTag)})
+          </button>
+        </div>
+      `;
+    }
+
     if (!data.files || data.files.length === 0) {
-      list.innerHTML = '<div class="empty-state">No .gguf weight files found in this repository.</div>';
+      list.innerHTML = ollamaBannerHtml + '<div class="empty-state">No .gguf weight files found in this repository.</div>';
       return;
     }
 
-    list.innerHTML = data.files
+    list.innerHTML = ollamaBannerHtml + data.files
       .map((f) => {
         const isRec = f.recommended;
         const rowClass = isRec ? "file-row recommended-quant" : "file-row";
         const recBadge = isRec ? '<span class="badge badge-success">⭐ Recommended</span>' : "";
         const sizeBadge = f.size_formatted ? `<span class="badge badge-file-size">💾 ${f.size_formatted}</span>` : "";
         const guideText = f.guide ? `<div class="file-guide-text">${f.guide}</div>` : "";
+
+        const actionBtn = (f.download_url && f.download_url.startsWith("ollama pull"))
+          ? `<button class="btn-primary btn-sm" onclick="closeInspectModal(); pullOllamaDirect('${escapeHubHtml(activeOllamaTag)}', '${escapeHubHtml(f.filename)}')" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%); border-color: #0284c7; font-weight: 600;">
+               ⬇️ Pull Model
+             </button>`
+          : `<button class="btn-primary btn-sm" onclick="triggerModelDownload('${f.download_url}', '${f.filename}', '${repoId}')">
+               ⬇️ Download &amp; Import
+             </button>`;
 
         return `
         <div class="${rowClass}">
@@ -675,9 +919,7 @@ async function openInspectModal(repoId) {
             </div>
             ${guideText}
           </div>
-          <button class="btn-primary btn-sm" onclick="triggerModelDownload('${f.download_url}', '${f.filename}', '${repoId}')">
-            ⬇️ Download &amp; Import
-          </button>
+          ${actionBtn}
         </div>
       `;
       })

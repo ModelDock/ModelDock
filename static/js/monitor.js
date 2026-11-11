@@ -7,10 +7,12 @@ let monitorInterval = null;
 function initMonitor() {
   refreshTelemetry();
   checkEngineStatus();
+  refreshRunningContainers();
   // Poll every 3 seconds for zero background overhead
   monitorInterval = setInterval(() => {
     refreshTelemetry();
     checkEngineStatus();
+    refreshRunningContainers();
   }, 3000);
 }
 
@@ -119,4 +121,178 @@ async function checkEngineStatus() {
     if (pill) pill.className = "status-pill status-offline";
     if (text) text.textContent = "Engine Unreachable";
   }
+}
+
+// --- Docker-Style Model Container Runtime Manager ---
+
+async function refreshRunningContainers() {
+  const containerListEl = document.getElementById("containers-list-container");
+  if (!containerListEl) return;
+
+  try {
+    const res = await fetch("/api/engine/containers");
+    if (!res.ok) return;
+    const containers = await res.json();
+
+    // Update Telemetry Containers Section
+    if (!containers || containers.length === 0) {
+      containerListEl.innerHTML = `
+        <div class="empty-state" style="padding: 1.5rem; border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); text-align: center; background: rgba(0, 0, 0, 0.15);">
+          <div style="font-size: 1.8rem; margin-bottom: 0.35rem;">💤</div>
+          <h4 style="margin: 0 0 0.3rem 0; font-size: 0.95rem; color: #f1f5f9;">No Active Model Containers in Memory</h4>
+          <p style="margin: 0; font-size: 0.8rem; color: var(--text-secondary);">
+            Hardware is running at 100% idle with zero model VRAM overhead. Launching any model in Chat will create and spin up an active container instance here.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    containerListEl.innerHTML = containers
+      .map((c) => {
+        const isPaused = Boolean(c.is_paused);
+        const cardClass = isPaused ? "container-card is-paused" : "container-card";
+        const statusBadge = isPaused
+          ? '<span class="container-status-badge paused"><span class="status-dot" style="background:#facc15;"></span> Paused</span>'
+          : '<span class="container-status-badge running"><span class="status-dot" style="background:#10b981;"></span> Running</span>';
+
+        const pauseActionBtn = isPaused
+          ? `<button class="btn-primary btn-sm" onclick="resumeModelContainer()" title="Resume active container computation" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%);">
+               ▶️ Resume
+             </button>`
+          : `<button class="btn-secondary btn-sm" onclick="pauseModelContainer()" title="Suspend compute to cool down CPU/GPU without unloading weights">
+               ⏸️ Pause
+             </button>`;
+
+        const tempStr = c.temperature_c ? `${c.temperature_c} °C` : "--";
+
+        return `
+          <div class="${cardClass}">
+            <div class="container-top">
+              <div class="container-meta">
+                <span class="container-id-badge">${escapeMonitorHtml(c.id)}</span>
+                <span class="container-name">${escapeMonitorHtml(c.display_name || c.model_name)}</span>
+                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 0.72rem;">
+                  ${escapeMonitorHtml(c.family)} • ${escapeMonitorHtml(c.type)}
+                </span>
+                ${statusBadge}
+              </div>
+              <div style="font-size: 0.76rem; color: var(--text-secondary); font-family: var(--font-mono);">
+                PID: <strong>${c.pid || "Active"}</strong> ${c.port ? `• Port: <strong>${c.port}</strong>` : ""}
+              </div>
+            </div>
+
+            <div class="container-metrics-grid">
+              <div class="container-metric-item">
+                <span class="container-metric-label">GPU VRAM Allocated</span>
+                <span class="container-metric-value" style="color: #38bdf8;">${c.vram_formatted}</span>
+              </div>
+              <div class="container-metric-item">
+                <span class="container-metric-label">Host RAM (RSS)</span>
+                <span class="container-metric-value">${c.ram_mb} MB</span>
+              </div>
+              <div class="container-metric-item">
+                <span class="container-metric-label">Process CPU %</span>
+                <span class="container-metric-value">${c.cpu_percent}%</span>
+              </div>
+              <div class="container-metric-item">
+                <span class="container-metric-label">Hardware Temp</span>
+                <span class="container-metric-value" style="color: #facc15;">${tempStr}</span>
+              </div>
+              <div class="container-metric-item">
+                <span class="container-metric-label">Container Uptime</span>
+                <span class="container-metric-value">${c.uptime_formatted}</span>
+              </div>
+            </div>
+
+            <div class="container-actions-row">
+              ${pauseActionBtn}
+              <button class="btn-secondary btn-sm" onclick="purgeModelVram()" title="Free cached PyTorch/CUDA VRAM buffers without terminating the model">
+                ⚡ Purge VRAM
+              </button>
+              <button class="btn-danger btn-sm" onclick="stopActiveModelContainer()" title="Emergency stop: Terminate container process and free all GPU/CPU memory">
+                ⏹️ Stop & Free VRAM
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  } catch (err) {
+    // Silent catch on poll
+  }
+}
+
+async function pauseModelContainer() {
+  try {
+    const res = await fetch("/api/engine/pause", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      await refreshRunningContainers();
+    } else {
+      alert(`Pause failed: ${data.error || "Unknown error"}`);
+    }
+  } catch (e) {
+    alert(`Request error: ${e.message}`);
+  }
+}
+window.pauseModelContainer = pauseModelContainer;
+
+async function resumeModelContainer() {
+  try {
+    const res = await fetch("/api/engine/resume", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      await refreshRunningContainers();
+    } else {
+      alert(`Resume failed: ${data.error || "Unknown error"}`);
+    }
+  } catch (e) {
+    alert(`Request error: ${e.message}`);
+  }
+}
+window.resumeModelContainer = resumeModelContainer;
+
+async function stopActiveModelContainer(event) {
+  if (event) event.stopPropagation();
+  if (!confirm("Are you sure you want to stop the active model container and free all GPU/CPU memory?")) return;
+
+  try {
+    const res = await fetch("/api/engine/stop", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      await refreshRunningContainers();
+      await refreshTelemetry();
+    } else {
+      alert(`Stop failed: ${data.error || "Unknown error"}`);
+    }
+  } catch (e) {
+    alert(`Request error: ${e.message}`);
+  }
+}
+window.stopActiveModelContainer = stopActiveModelContainer;
+
+async function purgeModelVram() {
+  try {
+    const res = await fetch("/api/engine/free-memory", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      await refreshRunningContainers();
+      await refreshTelemetry();
+      alert("✓ GPU VRAM and cached memory buffers purged successfully.");
+    }
+  } catch (e) {
+    alert(`Purge error: ${e.message}`);
+  }
+}
+window.purgeModelVram = purgeModelVram;
+
+function escapeMonitorHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }

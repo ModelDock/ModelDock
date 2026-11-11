@@ -33,6 +33,9 @@ class NativeEngineManager:
         self.active_model_path: Optional[str] = None
         self.active_model_name: Optional[str] = None
         self.is_fallback_mode: bool = False
+        self.is_paused: bool = False
+        self.start_timestamp: float = 0.0
+        self.is_visual_active: bool = False
 
         # Ensure model directories exist
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,10 +59,30 @@ class NativeEngineManager:
     def get_host(self) -> str:
         return self.host
 
+    def get_search_dirs(self) -> List[Path]:
+        """Return all model search directories including user-configured directories."""
+        dirs = []
+        cfg_models = self.config.get("models_dir")
+        if cfg_models:
+            p = Path(cfg_models)
+            if p.is_dir() and p not in dirs:
+                dirs.append(p)
+        cfg_downloads = self.config.get("downloads_dir")
+        if cfg_downloads:
+            p = Path(cfg_downloads)
+            if p.is_dir() and p not in dirs:
+                dirs.append(p)
+        # Always include project default models and downloads folders as well
+        if MODELS_DIR.is_dir() and MODELS_DIR not in dirs:
+            dirs.append(MODELS_DIR)
+        if DOWNLOADS_DIR.is_dir() and DOWNLOADS_DIR not in dirs:
+            dirs.append(DOWNLOADS_DIR)
+        return dirs
+
     def list_installed_models(self) -> List[Dict[str, Any]]:
-        """Scan models/ and downloads/ for all valid .gguf models and enrich with GGUF header specs."""
+        """Scan configured models/ and downloads/ directories for all valid .gguf models."""
         models = []
-        search_dirs = [MODELS_DIR, DOWNLOADS_DIR]
+        search_dirs = self.get_search_dirs()
         seen_paths = set()
 
         for sdir in search_dirs:
@@ -113,8 +136,10 @@ class NativeEngineManager:
                     "quantization": meta.get("quantization", "Q4_K_M"),
                     "is_active": is_active,
                     "source": "Native GGUF Engine",
-                    "family": meta.get("architecture", f.name.split("-")[0]).capitalize(),
+                    "family": meta.get("family") or meta.get("architecture", f.name.split("-")[0]).capitalize(),
                     "architecture": meta.get("architecture", "llm"),
+                    "is_visual": meta.get("is_visual", False),
+                    "model_type": meta.get("model_type", "Dense Neural Model"),
                     "context_length": meta.get("context_length", 4096),
                     "context_formatted": meta.get("context_formatted", "4,096 tokens"),
                     "block_count": meta.get("block_count", 0),
@@ -228,9 +253,23 @@ class NativeEngineManager:
                 except Exception:
                     pass
             self.active_process = None
-            self.active_model_path = None
-            self.active_model_name = None
+        self.active_model_path = None
+        self.active_model_name = None
         self.is_visual_active = False
+        self.is_paused = False
+        self.start_timestamp = 0.0
+
+        # Ensure no orphan llama-server.exe process remains on Windows
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "llama-server.exe"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2.0
+                )
+            except Exception:
+                pass
 
     def start_model(self, model_identifier: str, context_length: int = 4096) -> Dict[str, Any]:
         """
@@ -244,6 +283,19 @@ class NativeEngineManager:
                 if m["name"] == model_identifier or m["filename"] == model_identifier or (m.get("alias") and m["alias"].lower() == model_identifier.lower()):
                     target = Path(m["file_path"])
                     break
+
+        # Fallback direct search in all search directories
+        if not target.is_file():
+            for sdir in self.get_search_dirs():
+                cand = sdir / model_identifier
+                if cand.is_file():
+                    target = cand
+                    break
+                if not model_identifier.endswith(".gguf"):
+                    cand_gguf = sdir / f"{model_identifier}.gguf"
+                    if cand_gguf.is_file():
+                        target = cand_gguf
+                        break
 
         if not target.is_file():
             return {"success": False, "error": f"Model not found: {model_identifier}"}
@@ -270,6 +322,8 @@ class NativeEngineManager:
             self.active_model_path = str(target.resolve())
             self.active_model_name = target.stem
             self.is_visual_active = True
+            self.start_timestamp = time.time()
+            self.is_paused = False
             return {
                 "success": True,
                 "model_name": target.stem,
@@ -340,6 +394,8 @@ class NativeEngineManager:
             start_time = time.time()
             while time.time() - start_time < 6.0:
                 if self.is_server_running():
+                    self.start_timestamp = time.time()
+                    self.is_paused = False
                     return {
                         "success": True,
                         "model_name": target.stem,
@@ -406,6 +462,137 @@ class NativeEngineManager:
                 except Exception as e:
                     return {"success": False, "error": str(e)}
         return {"success": False, "error": "Model not found."}
+
+    def get_running_containers(self) -> List[Dict[str, Any]]:
+        """
+        Return Docker-style list of active neural model container instances,
+        including live PID, memory/VRAM consumption, CPU %, and pause/run status.
+        """
+        import psutil
+        containers = []
+        now = time.time()
+
+        is_running = self.is_server_running()
+        if not is_running or not self.active_model_name:
+            return []
+
+        meta = {}
+        if self.active_model_path:
+            try:
+                meta = parse_gguf_metadata(self.active_model_path)
+            except Exception:
+                pass
+
+        model_name = self.active_model_name or (Path(self.active_model_path).stem if self.active_model_path else "Active Model")
+        display_name = meta.get("model_name") or model_name
+        family = meta.get("family") or meta.get("architecture") or "Neural Model"
+        model_type = meta.get("model_type") or ("Visual DiT Transformer" if getattr(self, "is_visual_active", False) else "LLM Reasoning Engine")
+        
+        uptime_sec = int(now - self.start_timestamp) if self.start_timestamp > 0 else 0
+        mins, secs = divmod(uptime_sec, 60)
+        hours, mins = divmod(mins, 60)
+        if hours > 0:
+            uptime_str = f"{hours}h {mins}m {secs}s"
+        elif mins > 0:
+            uptime_str = f"{mins}m {secs}s"
+        else:
+            uptime_str = f"{secs}s"
+
+        pid = None
+        ram_mb = 0.0
+        cpu_pct = 0.0
+        if self.active_process and self.active_process.poll() is None:
+            pid = self.active_process.pid
+            try:
+                proc = psutil.Process(pid)
+                ram_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+                cpu_pct = round(proc.cpu_percent(interval=None), 1)
+            except Exception:
+                pass
+        else:
+            try:
+                proc = psutil.Process(os.getpid())
+                pid = proc.pid
+                ram_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+                cpu_pct = round(proc.cpu_percent(interval=None), 1)
+            except Exception:
+                pass
+
+        vram_est = meta.get("estimated_vram") or "~3.5 GB VRAM"
+        vram_mb = int((meta.get("size_bytes", 3 * 1024**3) / (1024**2)) * 1.15) if meta.get("size_bytes") else 3500
+
+        gpu_temp = None
+        gpu_name = "Dedicated GPU"
+        try:
+            from core.system_monitor import get_gpu_metrics
+            gpu_m = get_gpu_metrics()
+            if gpu_m:
+                gpu_temp = gpu_m.get("temperature_c")
+                if gpu_m.get("name"):
+                    gpu_name = gpu_m["name"]
+        except Exception:
+            pass
+
+        container_status = "paused" if getattr(self, "is_paused", False) else "running"
+
+        containers.append({
+            "id": f"c-{self.port if not getattr(self, 'is_visual_active', False) else 'dit'}",
+            "container_name": f"modeldock-{model_name.lower().replace('.', '-')[:24]}",
+            "model_name": model_name,
+            "display_name": display_name,
+            "family": family,
+            "type": model_type,
+            "file_path": self.active_model_path or "",
+            "pid": pid,
+            "port": self.port if not getattr(self, "is_visual_active", False) else None,
+            "status": container_status,
+            "is_paused": getattr(self, "is_paused", False),
+            "ram_mb": ram_mb,
+            "cpu_percent": cpu_pct,
+            "vram_mb": vram_mb,
+            "vram_formatted": f"~{round(vram_mb / 1024, 1)} GB VRAM" if vram_mb >= 1024 else f"{vram_mb} MB VRAM",
+            "vram_requirement": vram_est,
+            "gpu_name": gpu_name,
+            "temperature_c": gpu_temp,
+            "uptime_sec": uptime_sec,
+            "uptime_formatted": uptime_str,
+            "parameter_size": meta.get("parameter_size", "Standard"),
+            "context_formatted": meta.get("context_formatted", "4,096 tokens"),
+        })
+
+        return containers
+
+    def pause_container(self) -> Dict[str, Any]:
+        """Pause / sleep the active model process to drop CPU/GPU compute to 0%."""
+        import psutil
+        if not self.is_server_running() and not self.active_model_name:
+            return {"success": False, "error": "No active model is currently running."}
+
+        self.is_paused = True
+        if self.active_process and self.active_process.poll() is None:
+            try:
+                proc = psutil.Process(self.active_process.pid)
+                proc.suspend()
+            except Exception as e:
+                print(f"[Engine] Suspend process error: {e}")
+
+        return {"success": True, "status": "paused", "message": f"Model '{self.active_model_name}' is paused (CPU compute suspended)."}
+
+    def resume_container(self) -> Dict[str, Any]:
+        """Resume / unpause the active model process."""
+        import psutil
+        if not self.is_server_running() and not self.active_model_name:
+            return {"success": False, "error": "No active model is currently running."}
+
+        self.is_paused = False
+        if self.active_process and self.active_process.poll() is None:
+            try:
+                proc = psutil.Process(self.active_process.pid)
+                proc.resume()
+            except Exception as e:
+                print(f"[Engine] Resume process error: {e}")
+
+        return {"success": True, "status": "running", "message": f"Model '{self.active_model_name}' resumed active execution."}
 
 
 EngineManager = NativeEngineManager
